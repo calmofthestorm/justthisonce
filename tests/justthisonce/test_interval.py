@@ -119,6 +119,10 @@ class test_Interval(unittest.TestCase):
     with self.assertRaises(AssertionError):
       Interval.fromAtoms([(0, 5), (4, 5)])
 
+    # and should be able to create empty intervals (regression test)
+    self.assertEqual(Interval.fromAtoms([]), Interval())
+    self.assertEqual(Interval.fromAtoms([(5, 0)]), Interval())
+
   def test_len(self):
     """Specifically test len. This is also being tested in the object invariant
        throughout the entire test suite so we just do a quick one here."""
@@ -163,6 +167,34 @@ class test_Interval(unittest.TestCase):
     with self.assertRaises(AssertionError):
       b.union(b)
 
+  def test_iterInterion(self):
+    """Tests the iterInterior method."""
+    atoms = [(0, 2), (4, 2), (8, 2)]
+    self.assertEqual(atoms, list(Interval.fromAtoms(atoms).iterInterior()))
+    self.assertEqual([], list(Interval().iterInterior()))
+
+  def test_iterExterior(self):
+    """Tests the iterExterior method."""
+    atoms = [(0, 2), (4, 2), (8, 2)]
+    ival = Interval.fromAtoms(atoms)
+    self.assertEquals(list(ival.iterExterior()), [(2, 2), (6, 2)])
+    self.assertEquals(list(ival.iterExterior(10)), [(2, 2), (6, 2)])
+    self.assertRaises(AssertionError, lambda: list(ival.iterExterior(9)))
+    self.assertEquals(list(ival.iterExterior(11)), [(2, 2), (6, 2), (10, 1)])
+    self.assertEquals(list(ival.iterExterior(3000)), [(2, 2), (6, 2), (10, 2990)])
+
+    # Length identities
+    cmpl = Interval.fromAtoms(ival.iterExterior(50))
+    self.assertEquals(len(cmpl) + len(ival), 50)
+    self.assertEquals(cmpl.union(ival), Interval.fromAtom(0, 50))
+    empty = Interval()
+    for length in (0, 1, 2, 5):
+      self.assertEquals(len(Interval.fromAtoms(empty.iterExterior(length))), \
+                        length)
+    ival = Interval.fromAtom(0, 1)
+    for length in (1, 2, 5):
+      self.assertEquals(len(Interval.fromAtoms(ival.iterExterior(length))), \
+                        length - 1)
+
 if __name__ == '__main__':
   unittest.main()
-

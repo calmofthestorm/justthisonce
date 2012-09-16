@@ -31,7 +31,10 @@ class Interval(object):
        are allowed, but all atoms must be disjoint."""
     atom = Interval()
     atom._extents = sorted([a for a in atoms if a[1] > 0])
-    atom._size = sum(zip(*atoms)[1])
+    if not atom._extents:
+      atom._size = 0
+    else:
+      atom._size = sum(zip(*atom._extents)[1])
 
     # We need to canonicalize any adjacent user inputs.
     atom = atom.union(Interval())
@@ -57,6 +60,31 @@ class Interval(object):
 
   def __ne__(self, other):
     return not self.__eq__(other)
+
+  def iterInterior(self):
+    """Returns an iterator over chunks of the interval that are "inside" the
+       interval, as (start, length) pairs."""
+    return iter(self._extents)
+
+  def iterExterior(self, total_length=None):
+    """Returns an iterator over chunks of the interval that are "outside" the
+       interval, as (start, length) pairs. This is essentially iterating the
+       complement of the interval, and as such needs to know the universe. We
+       assume that all universes start at 0, but do not know their length.
+       If total_length is provided, the iterator will (if appropriate) return a
+       chunk from the final piece of the interval to the end. If it is none,
+       then the interval is assumed to end at the final chunk of the interval.
+       If given, total_length must be greater than the largest item in the
+       interval."""
+    ptr = 0
+    for (start, length) in self._extents:
+      if start > ptr:
+        yield (ptr, start - ptr)
+      ptr = start + length
+
+    assert total_length is None or total_length >= ptr
+    if total_length is not None and ptr < total_length:
+      yield (ptr, total_length - ptr)
 
   def union(self, other):
     """Returns a new interval that is the union of the two supplied.
