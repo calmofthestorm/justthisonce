@@ -167,7 +167,7 @@ class test_Interval(unittest.TestCase):
     with self.assertRaises(AssertionError):
       b.union(b)
 
-  def test_iterInterion(self):
+  def test_iterInterior(self):
     """Tests the iterInterior method."""
     atoms = [(0, 2), (4, 2), (8, 2)]
     self.assertEqual(atoms, list(Interval.fromAtoms(atoms).iterInterior()))
