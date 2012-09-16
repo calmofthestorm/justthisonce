@@ -17,7 +17,7 @@ class Interval(object):
   @classmethod
   def fromAtom(klass, start, length):
     """Factory method that creates an interval consisting only of one piece
-       of specified start and length."""
+       of specified start and length. Length must be > 0."""
     atom = Interval()
     atom._extents = [(start, length)]
     atom._size = length
@@ -61,7 +61,6 @@ class Interval(object):
   def union(self, other):
     """Returns a new interval that is the union of the two supplied.
        The arguments must be disjoint."""
-    print self._extents, other._extents
     # Need to merge intervals
     self_i = other_i = 0
 

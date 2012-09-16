@@ -67,21 +67,102 @@ class test_Interval(unittest.TestCase):
 
   def test_eq_neq(self):
     """Makes sure equality and inequality work, since all other tests depend on
-       them."""
+       them. I test many values because Python's default eq/neq behavion can
+       be weird and miss edge cases."""
     # The other tests thoroughly test eq == true, so I focus on eq == false and
     # both values of ne.
     a = Interval.fromAtoms([(0, 2), (4, 2), (8, 2)])
     empty = Interval()
     self.assertFalse(a == Interval.fromAtoms([(0, 2)]))
     self.assertTrue(a != Interval.fromAtoms([(0, 2)]))
+
     self.assertTrue(a == a)
     self.assertFalse(a != a)
+
     self.assertFalse(a == empty)
     self.assertTrue(a != empty)
+
     self.assertTrue(empty == Interval())
     self.assertFalse(empty != Interval())
+
     self.assertTrue(empty == empty)
     self.assertFalse(empty != empty)
 
+    b = Interval.fromAtoms([(0, 2), (4, 2), (6, 2)])
+    c = Interval.fromAtoms([(0, 2), (4, 4)])
+    self.assertTrue(b == c)
+    self.assertFalse(b != c)
+
+    self.assertFalse(b != b)
+    self.assertTrue(b == b)
+    self.assertFalse(c != c)
+    self.assertTrue(c == Interval.fromAtoms([(0, 2), (4, 4)]))
+
+  def test_constructor_equiv(self):
+    """Make sure the from* constructors are equivalent. (Default is tested
+       with union)."""
+    a = Interval.fromAtom(3, 4).union(Interval.fromAtom(12, 10))
+    b = Interval.fromAtoms([(3, 4), (12, 10)])
+    self.assertEqual(a, b)
+
+    c = Interval.fromAtom(3, 4).union(Interval.fromAtom(7, 10))
+    d = Interval.fromAtoms([(7, 10), (3, 4)])
+    e = Interval.fromAtom(3, 14)
+    self.assertEqual(c, d)
+    self.assertEqual(d, e)
+
+    # fromAtoms must tolerate 0-length intervals.
+    f = Interval.fromAtoms([(0, 2), (2, 0), (2, 2)])
+    self.assertEqual(f, Interval.fromAtom(0, 4))
+
+    # and must not tolerate overlap.
+    with self.assertRaises(AssertionError):
+      Interval.fromAtoms([(0, 5), (4, 5)])
+
+  def test_len(self):
+    """Specifically test len. This is also being tested in the object invariant
+       throughout the entire test suite so we just do a quick one here."""
+    a = Interval.fromAtom(3, 3)
+    b = Interval.fromAtom(9, 5)
+    self.assertEqual(len(a) + len(b), len(a.union(b)))
+    self.assertEqual(len(a), 3)
+    self.assertEqual(len(b), 5)
+    self.assertEqual(len(Interval()), 0)
+
+  def test_union_overlap(self):
+    """It is part of the design spec that intervals to union must be disjoint,
+       since otherwise would likely indicate an error in the main program."""
+    # Off by one
+    with self.assertRaises(AssertionError):
+      Interval.fromAtom(0, 5).union(Interval.fromAtom(4, 5))
+    a = Interval.fromAtom(0, 5).union(Interval.fromAtom(5, 5))
+    self.assertEqual(a, Interval.fromAtom(0, 10))
+
+    # Containment
+    with self.assertRaises(AssertionError):
+      Interval.fromAtom(0, 5).union(Interval.fromAtom(2, 1))
+    with self.assertRaises(AssertionError):
+      Interval.fromAtom(2, 1).union(Interval.fromAtom(0, 5))
+
+    # Overlap by 1 (regression test)
+    with self.assertRaises(AssertionError):
+      Interval.fromAtom(0, 5).union(Interval.fromAtom(4, 1))
+    
+    # Multiple intervals
+    b = Interval.fromAtoms([(2, 3), (10, 3), (20, 10000)])
+    with self.assertRaises(AssertionError):
+      Interval.fromAtom(0, 5).union(b)
+    with self.assertRaises(AssertionError):
+      Interval.fromAtom(2, 19).union(b)
+    with self.assertRaises(AssertionError):
+      Interval.fromAtom(900, 2).union(b)
+
+    # With self
+    with self.assertRaises(AssertionError):
+      a.union(a)
+    with self.assertRaises(AssertionError):
+      b.union(b)
+
 if __name__ == '__main__':
-    unittest.main()
+  unittest.main()
+
