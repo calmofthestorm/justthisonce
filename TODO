@@ -1,0 +1,29 @@
+* test pad (except fsck)
+* Consider abstracting the filesystem for pad for DRY and mockability
+* test pad fsck and error recovery in presence of interruption and generally nail down fault tolerance
+* generally finish off pad
+
+* write python crypter
+
+* write frontend 
+  * messages
+* automated inttests
+
+* tag version 1.0
+
+* write C extension (pyrex/cython/swig/manual/ctypes)
+* delta tests (unit and int)
+
+* tag version 2.0
+
+* bare messages (mark alloc only)
+* optional pad hashing to guard against bitrot
+* message integrity verification
+* GPG inner layer
+* pad utility commands (add, clean, consolidate, gen, remote sync, etc)
+
+* tag version 3.0
+
+* social network integration (IE, shared pad support)
+
+* tag version 3.1
