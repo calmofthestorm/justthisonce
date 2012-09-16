@@ -1,0 +1,27 @@
+Since this project's main purpose is to modify and keep in a consistent state
+on-disk structures which are, by their nature, difficult to replace, testing is
+very important, especially of the pad and related classes.
+
+All the classes that are not simple containers make use of object invariants to
+ensure their state is consistent. These invariants are enforced with a metaclass
+that calls the class's _checkInvariant method before and after every public
+method call and after construction. These invariants range from simple and cheap
+to somewhat expensive checks, but none should have a serious impact on
+performance, so they are enabled at runtime as well.
+
+In addition to the invariants, all modules have unittests. These can easily be
+run with "nosetests" in the top directory and should be fairly quick. (Nose
+should not be required, but I find it very convenient as a test runner though
+I do not make use of it as an import at the moment). Invariants themselves are
+not individually tested for failure since there is no way to violate an
+invariant in a non-buggy class without messing with its internals and I prefer
+to keep my unit tests implementation agnostic.
+
+The disk-based pad also needs to ensure that interruptions at any time do not
+corrupt the structure -- we want pad operations to ideally be atomic or,
+failing that, at least fallback to a known good state, even if the crypt
+operation also occurs. This is tested with a combination of unit and functional
+tests.
+
+The goal of this project is to maintain at all times 100% line coverage for
+unit tests.

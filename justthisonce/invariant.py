@@ -1,5 +1,14 @@
-# Simple class-based invariants
-# From http://people.csail.mit.edu/pgbovine/wiki/doku.php?id=pythonclassinvariants
+"""
+Simple class-based invariants. Adapted from:
+http://people.csail.mit.edu/pgbovine/wiki/doku.php?id=pythonclassinvariants
+
+Provides a metaclass that will call _checkInvariant before and after every
+public method and after construction. Also works for getters and setters.
+Does NOT call for methods that start with _, including builtins like len or
+setitem, as these may be used internally at times when the invariant needs
+to be temporarily violated. You must call _checkInvariant manually in such
+cases if you wish to check invariants.
+"""
 
 import types
 
@@ -30,4 +39,7 @@ def EnforceInvariant(name, bases, attrs):
         f = attrs[k]
         if isinstance(f, types.FunctionType):
           attrs[k] = public(f)
+        elif isinstance(f, property):
+          attrs[k] = property(fset=public(f.fset), fget=public(f.fget), \
+                              fdel=public(f.fdel))
   return type(name, bases, attrs)
