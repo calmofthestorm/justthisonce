@@ -24,6 +24,20 @@ class Interval(object):
     atom._checkInvariant()
     return atom
 
+  @classmethod
+  def fromAtoms(klass, atoms):
+    """Factory method that creates an interval consisting of the specified
+       (start, length) pairs. They need not be sorted and zero-length atoms
+       are allowed, but all atoms must be disjoint."""
+    atom = Interval()
+    atom._extents = sorted([a for a in atoms if a[1] > 0])
+    atom._size = sum(zip(*atoms)[1])
+
+    # We need to canonicalize any adjacent user inputs.
+    atom = atom.union(Interval())
+    atom._checkInvariant()
+    return atom
+
   def _checkInvariant(self):
     assert self._size >= 0
     ptr = 0
@@ -36,18 +50,18 @@ class Interval(object):
     assert used == self._size
 
   def __len__(self):
-    return s._size
+    return self._size
 
-    # Need to merge intervals
-    self_i = other_i = 0
+  def __eq__(self, other):
+    return self._extents == other._extents
 
-    # The current open interval
-    start_cur = 0
-    length_cur = 0
+  def __ne__(self, other):
+    return not self.__eq__(other)
 
   def union(self, other):
     """Returns a new interval that is the union of the two supplied.
        The arguments must be disjoint."""
+    print self._extents, other._extents
     # Need to merge intervals
     self_i = other_i = 0
 
@@ -61,7 +75,7 @@ class Interval(object):
     while self_i < len(self._extents) or \
           other_i < len(other._extents):
       if self_i < len(self._extents) and \
-         (other_i == len(self._extents) or \
+         (other_i == len(other._extents) or \
          self._extents[self_i] < other._extents[other_i]):
         start, length = self._extents[self_i]
         self_i += 1
@@ -78,7 +92,8 @@ class Interval(object):
       else:
         # There was a skip so we need to save the old current and start
         # a new one.
-        merged.append((start_cur, length_cur))
+        if length_cur > 0:
+          merged.append((start_cur, length_cur))
         start_cur, length_cur = start, length
       merged_size += length
 

@@ -1,31 +1,87 @@
+import itertools
 import sys
 import unittest
 
-import justthisonce.interval
+from justthisonce.interval import Interval
+
+def _union_multi(ivals):
+  """Unions all args pairwise left-associative."""
+  if len(ivals) == 0:
+    return Interval()
+  else:
+    acc = ivals[0]
+    for ival in ivals[1:]:
+      acc = acc.union(ival)
+    return acc
 
 class test_Interval(unittest.TestCase):
-  def testEmpty(self):
-    int
+  def test_union_empty(self):
+    """Test that empty intervals are well behaved."""
+    a = Interval()
+    b = Interval()
+    c = a.union(b)
+    d = b.union(a)
+    self.assertEqual(a, b)
+    self.assertEqual(b, c)
+    self.assertEqual(c, d)
 
+  def test_union_sym_comm(self):
+    """Test that union is symmetric and commutative."""
 
-    def test_shuffle(self):
-        # make sure the shuffled sequence does not lose any elements
-        random.shuffle(self.seq)
-        self.seq.sort()
-        self.assertEqual(self.seq, range(10))
+    ivals = [Interval(), Interval.fromAtom(4, 2), Interval.fromAtom(6, 3), \
+             Interval.fromAtom(11, 2), Interval.fromAtom(13, 15)]
+    # If this were much larger we could use a prefix generator but I prefer
+    # simplicity to speed in tests.
+    correct = _union_multi(ivals)
+    for iv in itertools.permutations(ivals):
+      self.assertEqual(correct, _union_multi(iv))
 
-        # should raise an exception for an immutable sequence
-        self.assertRaises(TypeError, random.shuffle, (1,2,3))
+  def test_union_merge_start_zero(self):
+    """Tests merges for several coumpound intervals, all start at 0."""
+    # Simple case with an extra hole in the original spec.
+    a = Interval.fromAtoms([(0, 2), (4, 2), (6, 2)])
+    b = Interval.fromAtoms([(2, 2)])
+    self.assertEqual(a.union(b), Interval.fromAtom(0, 8))
 
-    def test_choice(self):
-        element = random.choice(self.seq)
-        self.assertTrue(element in self.seq)
+    # Holes filled partially
+    a = Interval.fromAtoms([(0, 2), (4, 2), (8, 2), (20, 3)])
+    b = Interval.fromAtoms([(2, 1), (6, 1), (10, 5), (16, 4)])
+    a_b = a.union(b)
+    self.assertEqual(Interval.fromAtoms([(0, 3), (4, 3), (8, 7), (16, 7)]), a_b)
+    a_b_c = a_b.union(Interval.fromAtoms([(3, 1), (7, 1)]))
+    self.assertEqual(Interval.fromAtoms([(0, 15), (16, 7)]), a_b_c)
+    a_b_c_d = a_b_c.union(Interval.fromAtom(15, 1))
+    self.assertEqual(Interval.fromAtom(0, 23), a_b_c_d)
+    self.assertEqual(len(a_b_c_d), 23)
 
-    def test_sample(self):
-        with self.assertRaises(ValueError):
-            random.sample(self.seq, 20)
-        for element in random.sample(self.seq, 5):
-            self.assertTrue(element in self.seq)
+  def test_union_merge_start_nonzero(self):
+    """Tests merges for several coumpound intervals, all starting after 0
+       (regression test against special-case bug)"""
+    a = Interval.fromAtoms([(1, 2), (5, 2), (9, 2)])
+    b = Interval.fromAtoms([(3, 2), (7, 1)])
+    a_b = a.union(b)
+    self.assertEqual(a_b, Interval.fromAtoms([(1, 7), (9, 2)]))
+    a_b_c = Interval.fromAtom(8, 1).union(a_b)
+    self.assertEqual(a_b_c, Interval.fromAtom(1, 10))
+    self.assertEqual(len(a_b_c), 10)
+
+  def test_eq_neq(self):
+    """Makes sure equality and inequality work, since all other tests depend on
+       them."""
+    # The other tests thoroughly test eq == true, so I focus on eq == false and
+    # both values of ne.
+    a = Interval.fromAtoms([(0, 2), (4, 2), (8, 2)])
+    empty = Interval()
+    self.assertFalse(a == Interval.fromAtoms([(0, 2)]))
+    self.assertTrue(a != Interval.fromAtoms([(0, 2)]))
+    self.assertTrue(a == a)
+    self.assertFalse(a != a)
+    self.assertFalse(a == empty)
+    self.assertTrue(a != empty)
+    self.assertTrue(empty == Interval())
+    self.assertFalse(empty != Interval())
+    self.assertTrue(empty == empty)
+    self.assertFalse(empty != empty)
 
 if __name__ == '__main__':
     unittest.main()
