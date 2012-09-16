@@ -8,6 +8,8 @@
 * write frontend 
   * messages
 * automated inttests
+* integrate automatic pylint and/or pychecker; write project-specific style
+* documentation
 
 * tag version 1.0
 
