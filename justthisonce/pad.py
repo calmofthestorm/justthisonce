@@ -58,11 +58,16 @@ class File(object):
   def free(self):
     return self.size - self.used
 
+  @property
+  def path(self):
+    """Returns the path of the padfile relative to the paddir."""
+    return "%s/%s" % (self._subdir, self.filename)
+
   def getAllocation(self, requested):
     """Requests an allocation from the file of the given size. Raises OutOfPad
        if the file is out of space."""
     if requested > self.free:
-      raise OutOfPad("File %i has %i bytes but you requested %i." % \
+      raise OutOfPad("File %s has %i bytes but you requested %i." % \
                      (self.filename, self.free, requested))
 
     alloc = Allocation()
@@ -80,6 +85,7 @@ class File(object):
     """Mark the specified interval as used. Error if overlaps with currently
        used area."""
     self._extents = self._extents.union(ival)
+    self.used += len(ival)
 
 class Allocation(object):
   """Holds an allocation on te pad, which may contain multiple chunks in
@@ -103,10 +109,11 @@ class Allocation(object):
 
   def _checkInvariant(self):
     # Size of an allocation must be the sum of the lengths of its' intervals.
-    assert self._size == sum((len(ival) for (ival, _) in self._alloc.itervalues()))
+    assert self._size == sum((len(ival) \
+                              for (ival, _) in self._alloc.itervalues()))
 
     # Intervals must not exceed size of file.
-    assert all((len(ival) == 0 or (ival.max() < padfile.size and ival.min() >= 0) \
+    assert all((len(ival) == 0 or (ival.max() < padfile.size and ival.min()>=0)\
                 for (ival, padfile) in self._alloc.itervalues()))
 
     # A file may not appear more than once
@@ -136,7 +143,7 @@ class Allocation(object):
 
     # Add in any files just in the other.
     for (filename, (ival, padfile)) in other._alloc.iteritems():
-        merged.setdefault(filename, (ival, padfile))
+      merged.setdefault(filename, (ival, padfile))
 
     rval = Allocation()
     rval._size = self._size + other._size
@@ -166,6 +173,7 @@ class Pad(object):
   """Represents an on-disk pad dir."""
   __metaclass__ = invariant.EnforceInvariant
 
+  #TODO: Refactor this mess
   def __init__(self, path, create=False, fsck=False):
     """Opens a pad at the specified path. If create is True, will initialize
        the pad if it does not exist."""
@@ -204,7 +212,8 @@ class Pad(object):
         raise InvalidPad("Directory structure bad")
       fn.extend(os.listdir("%s/%s" % (path, subdir)))
     if len(fn) != len(set(fn)):
-      raise InvalidPad("Duplicate pad filenames detected. Filenames must be unique.")
+      raise InvalidPad("Duplicate pad filenames detected. " \
+                       "Filenames must be unique.")
 
     # Check for pads that are in metadata but not on-disk. If they
     # have any used space, their absence is an error but if not, they may
@@ -217,15 +226,18 @@ class Pad(object):
       if not os.path.exists("%s/current/%s" % (path, entry.filename)):
         if entry.used in (0, entry.size):
           if not fsck:
-            raise PadDirty("Unused or consumed pad %s found in current. This is probably ok." % entry.filename)
+            raise PadDirty("Unused or consumed pad %s found in current." \
+                           "This is probably ok." % entry.filename)
           del self.metadata.current[i]
         elif os.path.exists("%s/incoming/%s" % (path, entry.filename)):
           if not fsck:
-            raise PadDirty("Entry %s found in incoming but expected in current." % entry.filename)
+            raise PadDirty("Entry %s found in incoming but expected in " \
+                           "current." % entry.filename)
           entry.subdir = "incoming"
         elif os.path.exists("%s/spent/%s" % (path, entry.filename)):
           if not fsck:
-            raise PadDirty("Pad found in spent but was not marked as used up in metadata.")
+            raise PadDirty("Pad found in spent but was not marked as " \
+                           "used up in metadata.")
           del self.metadata.current[i]
         else:
           raise InvalidPad("Missing non-unused padfile %s" % entry.filename)
@@ -238,8 +250,8 @@ class Pad(object):
         if not fsck:
           raise InvalidPad("Current pad file %s changed size from %i to %i" % \
                            (entry.filename, entry.size, actual))
-        # Can't trust it anymore. Mark it as spent but don't delete so can at least
-        # try to decrypt later.
+        # Can't trust it anymore. Mark it as spent but don't delete so can at
+        # least try to decrypt later.
         os.rename(entry.path, "%s/spent/%s" % (path, entry.filename))
         del self.metadata.current[i]
 
@@ -300,7 +312,6 @@ class Pad(object):
     needed = requested
     allocation = Allocation()
     for pad in self.metadata.current + new_files:
-      print "Allocating %i on %s" % (min(needed - len(allocation), pad.free), pad)
       newb = pad.getAllocation(min(needed - len(allocation), pad.free))
       allocation.unionUpdate(newb)
 

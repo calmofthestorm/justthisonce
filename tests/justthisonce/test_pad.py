@@ -5,7 +5,52 @@ import unittest
 from justthisonce.pad import *
 
 class test_File(unittest.TestCase):
-  pass
+  def _process_alloc_to_ival(self, alloc, padfile, length):
+    files = list(alloc.iterFiles())
+    self.assertEqual(len(files), 1)
+    (ival, pf), = files
+    self.assertEqual(length, len(ival))
+    self.assertEqual(padfile, pf)
+    return ival
+
+  def test_File(self):
+    """Tests the simple file class."""
+    a = File("myfile", 50, "current")
+    self.assertEqual(a.free, 50)
+    self.assertEqual(a.path, "current/myfile")
+    alloc = self._process_alloc_to_ival(a.getAllocation(35), a, 35)
+    
+    # Alloc has not been committed yet so the space is still free
+    self.assertEqual(a.free, 50)
+
+    # This allocation will overlap, so not both may be committed. This is
+    # enforced in the Pad, but here we should get an invariant warning.
+    alloc2 = self._process_alloc_to_ival(a.getAllocation(5), a, 5)
+    a.commitAllocation(alloc)
+    self.assertRaises(AssertionError, a.commitAllocation, alloc2)
+
+    # Can't commit twice!
+    self.assertRaises(AssertionError, a.commitAllocation, alloc)
+
+    # But it should work if we get a new one
+    alloc2 = self._process_alloc_to_ival(a.getAllocation(5), a, 5)
+    self.assertEqual(len(alloc2), 5)
+    a.commitAllocation(alloc2)
+    self.assertEqual(a.free, 10)
+    self.assertEqual(a.used, 40)
+
+    # Can't ask for more than there is!
+    self.assertRaises(OutOfPad, a.getAllocation, 11)
+
+    # But this is ok because they can't all commit.
+    a.getAllocation(9)
+    a.getAllocation(10)
+    alloc = self._process_alloc_to_ival(a.getAllocation(9), a, 9)
+    a.commitAllocation(alloc)
+    alloc = self._process_alloc_to_ival(a.getAllocation(1), a, 1)
+    a.commitAllocation(alloc)
+    self.assertEqual(a.free, 0)
+    self.assertEqual(a.used, 50)
 
 class test_Allocation(unittest.TestCase):
   def setUp(self):
