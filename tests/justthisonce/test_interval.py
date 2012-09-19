@@ -196,5 +196,17 @@ class test_Interval(unittest.TestCase):
       self.assertEquals(len(Interval.fromAtoms(ival.iterExterior(length))), \
                         length - 1)
 
+  def test_negative(self):
+    """Ensures intervals reject negative lengths and/or spans."""
+    # Negative start
+    atoms = [(-2, 2), (2, 2), (8, 2)]
+    self.assertRaises(AssertionError, Interval.fromAtoms, atoms)
+    self.assertRaises(AssertionError, Interval.fromAtom, -1, 1)
+
+    # Negative length
+    atoms = [(0, 2), (2, -2), (8, 2)]
+    self.assertRaises(AssertionError, Interval.fromAtoms, atoms)
+    self.assertRaises(AssertionError, Interval.fromAtom, 1, -1)
+
 if __name__ == '__main__':
   unittest.main()

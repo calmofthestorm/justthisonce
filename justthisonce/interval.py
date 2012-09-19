@@ -30,7 +30,7 @@ class Interval(object):
        (start, length) pairs. They need not be sorted and zero-length atoms
        are allowed, but all atoms must be disjoint."""
     atom = Interval()
-    atom._extents = sorted([a for a in atoms if a[1] > 0])
+    atom._extents = sorted([a for a in atoms if a[1] != 0])
     if not atom._extents:
       atom._size = 0
     else:
