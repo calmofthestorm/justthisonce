@@ -132,3 +132,19 @@ class Interval(object):
     rval._extents = merged
     rval._size = merged_size
     return rval
+ 
+  def min(self):
+    """Returns the smallest value in the interval. If the interval is empty,
+       returns None."""
+    if not self._extents:
+      return None
+    else:
+      return self._extents[0][0]
+ 
+  def max(self):
+    """Returns the largest value in the interval. If the interval is empty,
+       returns None."""
+    if not self._extents:
+      return None
+    else:
+      return sum(self._extents[-1]) - 1

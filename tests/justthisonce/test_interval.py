@@ -208,5 +208,20 @@ class test_Interval(unittest.TestCase):
     self.assertRaises(AssertionError, Interval.fromAtoms, atoms)
     self.assertRaises(AssertionError, Interval.fromAtom, 1, -1)
 
+  def test_min_max(self):
+    """Test the min and max of the interval."""
+    atoms = [(0, 2), (8, 2), (4, 2)]
+    ival = Interval.fromAtoms(atoms)
+    self.assertEquals(ival.min(), 0)
+    self.assertEquals(ival.max(), 9)
+    
+    ival = Interval.fromAtom(5, 1)
+    self.assertEquals(ival.min(), 5)
+    self.assertEquals(ival.max(), 5)
+
+    ival = Interval()
+    self.assertIsNone(ival.min())
+    self.assertIsNone(ival.max())
+
 if __name__ == '__main__':
   unittest.main()
