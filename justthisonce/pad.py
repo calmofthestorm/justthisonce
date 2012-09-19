@@ -30,62 +30,6 @@ class OutOfPad(Error):
 class AllocationOutstanding(Error):
   """Cannot allocate another while one is outstanding."""
 
-class Allocation(object):
-  """Holds an allocation on te pad, which may contain multiple chunks in
-     multiple files. They may be constructed with union-like updates."""
-  __metaclass__ = invariant.EnforceInvariant
-
-  def __init__(self, padfile=None, start=None, length=None):
-    """With no arguments, creates an empty allocation. With three, creates an
-       allocation with a single interval."""
-
-    # Mapping from filename to (padfile, intervals)
-    self._alloc = collections.OrderedDict()
-    self._size = 0
-
-    if padfile is None or start is None or length is None:
-      assert padfile is None and start is None and length is None
-    else:
-      self._alloc[padfile.filename] = (Interval.fromAtom(start, length), \
-                                       padfile)
-      self._size = length
-
-  def _checkInvariant(self):
-    assert self._size == sum((len(ival) for ival in self._alloc.itervalues()))
-
-  def __len__(self):
-    return self._size
-
-  def union_update(self, other):
-    rval = self.union(other)
-    self._alloc = rval._alloc
-    self._size = rval._size
-
-  def union(self, other):
-    """Combines two allocations, merging adjacent intervals in the same file.
-       The result will have my files first, merged with the other's as
-       appropriate, followed by the files just in the other."""
-    merged = collections.OrderedDict()
-    for (filename, (ival, padfile)) in self._alloc.iteritems():
-      if filename in other._alloc:
-        other_ival, other_padfile = other._alloc[filename]
-        assert other_padfile is padfile
-        merged[filename] = (ival.union(other_ival), padfile)
-      else:
-        post_merge[filename] = (ival, padfile)
-
-    # Add in any files just in the other.
-    map(merged.setdefault, other._alloc.iteritems())
-
-    rval = Allocation()
-    rval._size = self._size + other._size
-    rval._alloc = merged
-    return rval
-
-  def iterFiles(self):
-    """Returns an iterator of (interval, file)."""
-    return self._alloc.itervalues()
-
 class File(object):
   """Holds data on what parts of a file have already been used."""
   __metaclass__ = invariant.EnforceInvariant
@@ -101,7 +45,7 @@ class File(object):
     self.filename = filename
 
     # Regions of the file in use.
-    self._extents = Interval
+    self._extents = Interval()
 
     # Subdir the file is currently in.
     self._subdir = subdir
@@ -124,7 +68,7 @@ class File(object):
     alloc = Allocation()
     for (start, length) in self._extents.iterExterior(self.size):
       seg = Allocation(self, start, min(requested - len(alloc), length))
-      alloc.union_update(seg)
+      alloc.unionUpdate(seg)
       if len(alloc) >= requested:
         assert len(alloc) == requested
         break
@@ -136,6 +80,79 @@ class File(object):
     """Mark the specified interval as used. Error if overlaps with currently
        used area."""
     self._extents = self._extents.union(ival)
+
+class Allocation(object):
+  """Holds an allocation on te pad, which may contain multiple chunks in
+     multiple files. They may be constructed with union-like updates."""
+  __metaclass__ = invariant.EnforceInvariant
+
+  def __init__(self, padfile=None, start=None, length=None):
+    """With no arguments, creates an empty allocation. With three, creates an
+       allocation with a single interval (which must not be empty.)"""
+
+    # Mapping from filename to (interval, padfile)
+    self._alloc = collections.OrderedDict()
+    self._size = 0
+
+    if padfile is None or start is None or length is None:
+      assert padfile is None and start is None and length is None
+    else:
+      self._alloc[padfile.filename] = (Interval.fromAtom(start, length), \
+                                       padfile)
+      self._size = length
+
+  def _checkInvariant(self):
+    # Size of an allocation must be the sum of the lengths of its' intervals.
+    assert self._size == sum((len(ival) for (ival, _) in self._alloc.itervalues()))
+
+    # Intervals must not exceed size of file.
+    assert all((len(ival) == 0 or (ival.max() < padfile.size and ival.min() >= 0) \
+                for (ival, padfile) in self._alloc.itervalues()))
+
+    # A file may not appear more than once
+    files = list(self._alloc.iterkeys())
+    assert len(files) == len(set(files))
+
+  def __len__(self):
+    return self._size
+
+  def unionUpdate(self, other):
+    rval = self.union(other)
+    self._alloc = rval._alloc
+    self._size = rval._size
+
+  def union(self, other):
+    """Combines two allocations, merging adjacent intervals in the same file.
+       The result will have my files first, merged with the other's as
+       appropriate, followed by the files just in the other."""
+    merged = collections.OrderedDict()
+    for (filename, (ival, padfile)) in self._alloc.iteritems():
+      if filename in other._alloc:
+        other_ival, other_padfile = other._alloc[filename]
+        assert other_padfile is padfile
+        merged[filename] = (ival.union(other_ival), padfile)
+      else:
+        merged[filename] = (ival, padfile)
+
+    # Add in any files just in the other.
+    for (filename, (ival, padfile)) in other._alloc.iteritems():
+        merged.setdefault(filename, (ival, padfile))
+
+    rval = Allocation()
+    rval._size = self._size + other._size
+    rval._alloc = merged
+    return rval
+
+  def iterFiles(self):
+    """Returns an iterator of (interval, file)."""
+    return self._alloc.itervalues()
+  
+  def __eq__(self, other):
+    # Order matters!
+    return self._size == other._size and self._alloc == other._alloc
+
+  def __ne__(self, other):
+    return not self.__eq__(other)
 
 class Metadata(object):
   """Represents all metadata of the pad that is saved to disk."""
@@ -285,7 +302,7 @@ class Pad(object):
     for pad in self.metadata.current + new_files:
       print "Allocating %i on %s" % (min(needed - len(allocation), pad.free), pad)
       newb = pad.getAllocation(min(needed - len(allocation), pad.free))
-      allocation.union_update(newb)
+      allocation.unionUpdate(newb)
 
     assert len(allocation) == requested
     self._uncomitted += 1
