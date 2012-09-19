@@ -98,6 +98,14 @@ class test_Interval(unittest.TestCase):
     self.assertFalse(c != c)
     self.assertTrue(c == Interval.fromAtoms([(0, 2), (4, 4)]))
 
+  def test_constructor(self):
+    """Tests that fromAtom can create empty intervals."""
+    a = Interval.fromAtom(0, 0)
+    b = Interval.fromAtom(10, 0)
+    self.assertEqual(a, b)
+    self.assertEqual(a, Interval())
+    self.assertEqual(a, Interval.fromAtoms([(0, 0), (5, 0)]))
+
   def test_constructor_equiv(self):
     """Make sure the from* constructors are equivalent. (Default is tested
        with union)."""

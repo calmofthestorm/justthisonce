@@ -17,9 +17,10 @@ class Interval(object):
   @classmethod
   def fromAtom(klass, start, length):
     """Factory method that creates an interval consisting only of one piece
-       of specified start and length. Length must be > 0."""
+       of specified start and length. Length must be >= 0."""
     atom = Interval()
-    atom._extents = [(start, length)]
+    if length != 0:
+      atom._extents = [(start, length)]
     atom._size = length
     atom._checkInvariant()
     return atom
