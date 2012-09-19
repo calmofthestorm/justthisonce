@@ -45,12 +45,18 @@ class test_File(unittest.TestCase):
     # But this is ok because they can't all commit.
     a.getAllocation(9)
     a.getAllocation(10)
+
+    # Let's fill it up.
     alloc = self._process_alloc_to_ival(a.getAllocation(9), a, 9)
     a.commitAllocation(alloc)
+    self.assertEqual(a.free, 1)
+    self.assertEqual(a.used, 49)
+
     alloc = self._process_alloc_to_ival(a.getAllocation(1), a, 1)
     a.commitAllocation(alloc)
     self.assertEqual(a.free, 0)
     self.assertEqual(a.used, 50)
+    self.assertRaises(OutOfPad, a.getAllocation, 11)
 
 class test_Allocation(unittest.TestCase):
   def setUp(self):
