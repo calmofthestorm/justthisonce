@@ -48,7 +48,7 @@ class File(object):
     self._extents = Interval()
 
     # Subdir the file is currently in.
-    self._subdir = subdir
+    self.subdir = subdir
 
   def _checkInvariant(self):
     assert self.size >= self.used
@@ -61,7 +61,7 @@ class File(object):
   @property
   def path(self):
     """Returns the path of the padfile relative to the paddir."""
-    return "%s/%s" % (self._subdir, self.filename)
+    return (self.subdir, self.filename)
 
   def getAllocation(self, requested):
     """Requests an allocation from the file of the given size. Raises OutOfPad
@@ -81,11 +81,17 @@ class File(object):
     assert len(alloc) == requested
     return alloc
 
-  def commitAllocation(self, ival):
+  def commitInterval(self, ival):
     """Mark the specified interval as used. Error if overlaps with currently
        used area."""
     self._extents = self._extents.union(ival)
     self.used += len(ival)
+
+  def consumeEntireFile(self):
+    """Mark the entire file as consumed. Used to prevent its use for encryption
+       while keeping it around for decryption."""
+    self.used = self.size
+    self._extents = Interval.fromAtom(0, self.size)
 
 class Allocation(object):
   """Holds an allocation on te pad, which may contain multiple chunks in
@@ -124,6 +130,7 @@ class Allocation(object):
     return self._size
 
   def unionUpdate(self, other):
+    """As union, but updates the left with the result."""
     rval = self.union(other)
     self._alloc = rval._alloc
     self._size = rval._size
@@ -169,34 +176,93 @@ class Metadata(object):
     self.compatability = None
     self.version = None
 
+class Filesystem(object):
+  """Shim class to abstract interactions with the filesystem. This makes it
+     easier to test Pad and also improves flexibility for changes to backend
+     and reduces points of failure for directory traversal attacks
+     (a malicious message could trivially write any file on the system to the
+     output file without this by claiming to be encrypted with that file and
+     sending a known/zeroed message). All paths are given as component tuples
+     except that of root in the constructor."""
+
+  def __init__(self, path):
+    """Assumes control of the directory at path."""
+    self.root = path
+    self._readonly = False
+
+  def _relpath(self, path):
+    """Returns the given path relative to the start. Raises assertion if
+       is not a subdir of the path given in the ctor."""
+    if isinstance(path, basestring):
+      path = path,
+    relpath = os.path.relpath(os.path.join(path), start=self.root)
+    assert os.path.commonprefix((relpath, self.root) != "/")
+    return os.path.join(self.root, relpath)
+
+  def set_readonly(self):
+    """Enters readonly mode. No further changes to the managed directory
+       will occur."""
+    self._readonly = True
+
+  def mkdir(self, path):
+    """Wraps os.mkdir relative to the root."""
+    assert not self._readonly
+    os.path.join(self._relpath(path))
+
+  def exists(self, path):
+    """Wraps os.path.exists relative to the root."""
+    return os.path.exists(self._relpath(path))
+
+  def stat(self, path):
+    """Wraps os.stat relative to the root."""
+    return os.stat(self._relpath(path))
+
+  def listdir(self, path):
+    """Wraps os.listdir relative to the root."""
+    return os.listdir(self._relpath(path))
+
+  def rename(self, old, new):
+    """Wraps os.rename relative to the root."""
+    assert not self._readonly
+    return os.rename(self._relpath(old), self._relpath(new))
+
+  def open(self, path, mode='r', buffering=-1):
+    """Wraps open relative to the root."""
+    assert not self._readonly or set("rbU").issuperset(mode)
+    return open(self._relpath(path), mode, buffering)
+
 class Pad(object):
   """Represents an on-disk pad dir."""
   __metaclass__ = invariant.EnforceInvariant
 
-  #TODO: Refactor this mess
-  def __init__(self, path, create=False, fsck=False):
-    """Opens a pad at the specified path. If create is True, will initialize
-       the pad if it does not exist."""
-    self._uncomitted = 0
-    if not os.path.exists(path):
-      if create:
-        for subdir in "", "incoming", "current", "spent":
-          os.mkdir("%s/%s" % (path, subdir))
-        cPickle.dump(Metadata(), open("%s/metadata.pck" % path, 'w'), -1)
-        open("%s/VERSION" % path, 'w').write("%s\n%s" % (COMPAT, VERSION))
-      else:
-        raise InvalidPad("No such file or directory: %s" % path)
-    
+  @classmethod
+  def createPad(cls, fs):
+    """Creates a new pad on the provided fs. Will not clobber an
+       exinting non-emptf directory."""
+    if fs.exists("."):
+      if fs.listdir("."):
+        raise InvalidPad("Directory exists and is not empty.")
+    else:
+      fs.mkdir(".")
+
+    for subdir in "incoming", "current", "spent":
+      fs.mkdir(subdir)
+    cPickle.dump(Metadata(), fs.open("metadata.pck", 'w'), -1)
+    fs.open("VERSION", 'w').write("%s\n%s" % (COMPAT, VERSION))
+
+  def _loadMetadata(self):
+    """Helper for init. Loads the metadata from the filesystem. Raises
+       InvalidPad if the metadata is bad or from an unsupperted version."""
     # Try to load the metadata
     try:
-      self.metadata = cPickle.load(open("%s/metadata.pck" % path))
+      self.metadata = cPickle.load(self._fs.open("metadata.pck"))
     except:
       raise InvalidPad("Metadata missing or corrupt")
 
     # Check the version and compatability
     try:
       self.metadata.compatability, self.metadata.version = \
-          map(int, open("%s/VERSION" % path).read().split("\n"))
+          map(int, self._fs.open("VERSION").read().split("\n"))
     except:
       raise InvalidPad("Version missing or corrupt")
 
@@ -205,65 +271,84 @@ class Pad(object):
       raise InvalidPad("Pad is protocol %i but I only understand up to %i" % \
                        (self.metadata.compatability, COMPAT))
 
-    # Verify directory structure and check for duplicate filenames.
+  def _verifyDirStructure(self):
+    """Helper for init. Verifies the structure in the paddir is valid."""
     fn = []
     for subdir in "incoming", "current", "spent":
-      if not os.path.exists("%s/%s" % (path, subdir)):
+      if not self._fs.exists(subdir):
         raise InvalidPad("Directory structure bad")
-      fn.extend(os.listdir("%s/%s" % (path, subdir)))
+      fn.extend(self._fs.listdir(subdir))
     if len(fn) != len(set(fn)):
       raise InvalidPad("Duplicate pad filenames detected. " \
                        "Filenames must be unique.")
+
+  def _findMissingPads(self):
+    """Helper for init. Looks for missing pads and sets readonly on the
+       fs if any are found."""
+    for i in reversed(range(len(self.metadata.current))):
+      entry = self.metadata.current[i]
+      assert entry.subdir == "current"
+      if not self._fs.exists((entry.subdir, entry.filename)):
+        if entry.used in (0, entry.size):
+          # Unused or consumed pad found in current. This is probably ok.
+          self._fs.set_readonly()
+          del self.metadata.current[i]
+        elif self._fs.exists(("incoming", entry.filename)):
+          # Padfile found in incoming but expected in current.
+          self._fs.set_readonly()
+          entry.subdir = "incoming"
+        elif self._fs.exists(("spent", entry.filename)):
+          # Pad found in spent but was not marked as used up in metadata.
+          self._fs.set_readonly()
+          entry.subdir = "spent"
+          entry.consumeEntireFile()
+        else:
+          # Missing non-unused padfile.
+          self._fs.set_readonly()
+          del self.metadata.current[i]
+
+  def _verifyPadfileSize(self):
+    """Helper for init. Verifies all pad sizes."""
+    for i in reversed(range(len(self.metadata.current))):
+      entry = self.metadata.current[i]
+      actual = self._fs.stat(("current", entry.filename))
+      if entry.size != actual:
+        # Current pad file changed size
+        self._fs.set_readonly()
+
+        # Can't trust it anymore. Mark it as spent but don't delete so can at
+        # least try to decrypt.
+        entry.consumeEntireFile()
+
+  def __init__(self, fs):
+    """Opens a pad. If create is True, will initialize
+       the pad if it does not exist."""
+    self._fs = fs
+    self._uncomitted = 0
+    self.metadata = None
+    if not self._fs.exists("."):
+      raise InvalidPad("No such file or directory.")
+    
+    # Try to load the metadata
+    self._loadMetadata()
+
+    # Verify directory structure and check for duplicate filenames.
+    self._verifyDirStructure()
 
     # Check for pads that are in metadata but not on-disk. If they
     # have any used space, their absence is an error but if not, they may
     # be stragglers left over from an interrupted "claiming" of a new
     # pad file, and we can savely remove their metadata.
-    # TODO: Verify size during fsck
-    for i in reversed(range(len(self.metadata.current))):
-      entry = self.metadata.current[i]
-      assert entry.subdir == "current"
-      if not os.path.exists("%s/current/%s" % (path, entry.filename)):
-        if entry.used in (0, entry.size):
-          if not fsck:
-            raise PadDirty("Unused or consumed pad %s found in current." \
-                           "This is probably ok." % entry.filename)
-          del self.metadata.current[i]
-        elif os.path.exists("%s/incoming/%s" % (path, entry.filename)):
-          if not fsck:
-            raise PadDirty("Entry %s found in incoming but expected in " \
-                           "current." % entry.filename)
-          entry.subdir = "incoming"
-        elif os.path.exists("%s/spent/%s" % (path, entry.filename)):
-          if not fsck:
-            raise PadDirty("Pad found in spent but was not marked as " \
-                           "used up in metadata.")
-          del self.metadata.current[i]
-        else:
-          raise InvalidPad("Missing non-unused padfile %s" % entry.filename)
+    self._findMissingPads()
 
     # Verify the size of all pads that are in use
-    for i in reversed(range(len(self.metadata.current))):
-      entry = self.metadata.current[i]
-      actual = os.stat("%s/current/%s" % (path, entry.filename))
-      if entry.size != actual:
-        if not fsck:
-          raise InvalidPad("Current pad file %s changed size from %i to %i" % \
-                           (entry.filename, entry.size, actual))
-        # Can't trust it anymore. Mark it as spent but don't delete so can at
-        # least try to decrypt later.
-        os.rename(entry.path, "%s/spent/%s" % (path, entry.filename))
-        del self.metadata.current[i]
+    self._verifyPadfileSize() 
 
-    # Save the path
-    self.path = path
-
-    # Flush metadata if we were fscking
-    if fsck:
-      self.flush()
+    # Flush metadata
+    self.flush()
 
   def _checkInvariant(self):
-    assert self._uncomitted in (0, 1)
+    assert self._uncomitted in (0, 1) and self.metadata is not None
 
   def flush(self):
     """Flush the pad's current state to disk but do not close it. This will
@@ -274,10 +359,10 @@ class Pad(object):
     # actual files around should be able to tolerate reverting to these if
     # flush/close raises an exception.
     #TODO write recovery code and inttest it
-    os.rename("%s/metadata.pck" % self.path, "%s/metadata.bkp" % self.path)
-    os.rename("%s/VERSION" % self.path, "%s/VERSION.bkp" % self.path)
-    cPickle.dump(self.metadata, open("%s/metadata.pck" % self.path, 'w'), -1)
-    open("%s/VERSION" % self.path, 'w').write("%s\n%s" % (COMPAT, VERSION))
+    self._fs.rename("metadata.pck", "metadata.bkp")
+    self._fs.rename("VERSION", "metadata.bkp")
+    cPickle.dump(self.metadata, open("metadata.pck", 'w'), -1)
+    self._fs.open("VERSION", 'w').write("%s\n%s" % (COMPAT, VERSION))
 
   def getAllocation(self, requested):
     """Requests the pad to allocate requested bytes of pad. Returns an
@@ -292,8 +377,8 @@ class Pad(object):
       # We need more pad. Look through incoming to see if we can service the
       # request, beginning with the smallest files.
       can_get = 0
-      new_pads = [(fn, os.stat("%s/incoming/%s" % (self.path, fn)).st_size) \
-                  for fn in os.listdir("%s/incoming" % (self.path))]
+      new_pads = [(fn, self._fs.stat(("incoming", fn)).st_size) \
+                  for fn in os.listdir("incoming")]
       new_pads.sort(lambda (pad, size): size)
       last_need = -1
       for last_need, (pad, size) in enumerate(new_pads):
@@ -333,13 +418,13 @@ class Pad(object):
     for (ival, padfile) in alloc.iterFiles():
       if padfile not in self.metadata.current:
         assert padfile.subdir == "incoming"
-        os.rename(padfile.path, "%s/current/%s" % (path, padfile.filename))
+        os.rename(padfile.path, ("current", padfile.filename))
         padfile.subdir = "current"
 
       # Mark used extents as used in file, and move to spent if necessary
       padfile.markIntervalAsUsed(ival)
       if padfile.free == 0:
-        os.rename(padfile.path, "%s/spent/%s" % (path, padfile.filename))
+        os.rename(padfile.path, ("spent", padfile.filename))
       
     # Write out the metadata
     self.flush()

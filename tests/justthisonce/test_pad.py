@@ -17,7 +17,7 @@ class test_File(unittest.TestCase):
     """Tests the simple file class."""
     a = File("myfile", 50, "current")
     self.assertEqual(a.free, 50)
-    self.assertEqual(a.path, "current/myfile")
+    self.assertEqual(a.path, ("current", "myfile"))
     alloc = self._process_alloc_to_ival(a.getAllocation(35), a, 35)
     
     # Alloc has not been committed yet so the space is still free
@@ -26,16 +26,16 @@ class test_File(unittest.TestCase):
     # This allocation will overlap, so not both may be committed. This is
     # enforced in the Pad, but here we should get an invariant warning.
     alloc2 = self._process_alloc_to_ival(a.getAllocation(5), a, 5)
-    a.commitAllocation(alloc)
-    self.assertRaises(AssertionError, a.commitAllocation, alloc2)
+    a.commitInterval(alloc)
+    self.assertRaises(AssertionError, a.commitInterval, alloc2)
 
     # Can't commit twice!
-    self.assertRaises(AssertionError, a.commitAllocation, alloc)
+    self.assertRaises(AssertionError, a.commitInterval, alloc)
 
     # But it should work if we get a new one
     alloc2 = self._process_alloc_to_ival(a.getAllocation(5), a, 5)
     self.assertEqual(len(alloc2), 5)
-    a.commitAllocation(alloc2)
+    a.commitInterval(alloc2)
     self.assertEqual(a.free, 10)
     self.assertEqual(a.used, 40)
 
@@ -48,15 +48,32 @@ class test_File(unittest.TestCase):
 
     # Let's fill it up.
     alloc = self._process_alloc_to_ival(a.getAllocation(9), a, 9)
-    a.commitAllocation(alloc)
+    a.commitInterval(alloc)
     self.assertEqual(a.free, 1)
     self.assertEqual(a.used, 49)
 
     alloc = self._process_alloc_to_ival(a.getAllocation(1), a, 1)
-    a.commitAllocation(alloc)
+    a.commitInterval(alloc)
     self.assertEqual(a.free, 0)
     self.assertEqual(a.used, 50)
     self.assertRaises(OutOfPad, a.getAllocation, 11)
+
+  def test_consumeEntireFile(self):
+    """Tests consumeEntireFile"""
+    def consumeAndTest(padfile):
+      a.consumeEntireFile()
+      self.assertEqual(a.free, 0)
+      self.assertEqual(a.used, a.size)
+
+    a = File("myfile", 50, "current")
+    a.commitInterval(Interval())
+    consumeAndTest(a)
+
+    a = File("myfile", 0, "current")
+    consumeAndTest(a)
+
+    a = File("myfile", 75, "current")
+    consumeAndTest(a)
 
 class test_Allocation(unittest.TestCase):
   def setUp(self):
@@ -91,15 +108,14 @@ class test_Allocation(unittest.TestCase):
 
     # Test a few combinations of file size and interval that should work.
     for (filesize, istart, ilen) in \
-        [(10, 0, 10), (2000, 50, 100), (100, 0, 5), (100, 90, 10)]:
+        [(10, 0, 10), (2000, 50, 100), (100, 0, 5), (100, 90, 10), (10, 5, 0)]:
       a, files, padfile = self._make_test_allocation(filesize, istart, ilen)
       self.assertEqual(len(a), ilen)
       self.assertEqual(files, [(Interval.fromAtom(istart, ilen), padfile)])
 
-    # 0-length intervals violate the invariant, as do those that exceed
-    # file bounds.
+    # Must not exceed file bounds.
     for (filesize, istart, ilen) in \
-        [(10, 5, 0), (10, 5, 15), (10, 12, 5), (10, -5, 5), (10, 5, -2)]:
+        [(10, 5, 15), (10, 12, 5), (10, -5, 5), (10, 5, -2)]:
       self.assertRaises(AssertionError,
                         self._make_test_allocation, filesize, istart, ilen)
 
@@ -192,6 +208,9 @@ class test_Allocation(unittest.TestCase):
     self.assertNotEqual(a, b)
     self.assertEqual(len(b), 64)
     self.assertEqual(len(a), 64)
+
+class test_Pad(unittest.TestCase):
+  pass
 
 if __name__ == '__main__':
   unittest.main()
