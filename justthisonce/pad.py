@@ -81,7 +81,7 @@ class File(object):
     assert len(alloc) == requested
     return alloc
 
-  def commitInterval(self, ival):
+  def commitAllocation(self, ival):
     """Mark the specified interval as used. Error if overlaps with currently
        used area."""
     self._extents = self._extents.union(ival)
@@ -130,7 +130,6 @@ class Allocation(object):
     return self._size
 
   def unionUpdate(self, other):
-    """As union, but updates the left with the result."""
     rval = self.union(other)
     self._alloc = rval._alloc
     self._size = rval._size
@@ -186,7 +185,8 @@ class Filesystem(object):
      except that of root in the constructor."""
 
   def __init__(self, path):
-    """Assumes control of the directory at path."""
+    """Assumes control of the directory at path. Path may not be root."""
+    assert path != "/"
     self.root = path
     self._readonly = False
 
@@ -195,11 +195,11 @@ class Filesystem(object):
        is not a subdir of the path given in the ctor."""
     if isinstance(path, basestring):
       path = path,
-    relpath = os.path.relpath(os.path.join(path), start=self.root)
-    assert os.path.commonprefix((relpath, self.root) != "/")
+    relpath = os.path.abspath(os.path.join(self.root, *path))
+    assert os.path.commonprefix((relpath, self.root)) == self.root
     return os.path.join(self.root, relpath)
 
-  def set_readonly(self):
+  def setReadonly(self):
     """Enters readonly mode. No further changes to the managed directory
        will occur."""
     self._readonly = True
@@ -207,7 +207,7 @@ class Filesystem(object):
   def mkdir(self, path):
     """Wraps os.mkdir relative to the root."""
     assert not self._readonly
-    os.path.join(self._relpath(path))
+    os.mkdir(self._relpath(path))
 
   def exists(self, path):
     """Wraps os.path.exists relative to the root."""
@@ -307,7 +307,7 @@ class Pad(object):
           self._fs.set_readonly()
           del self.metadata.current[i]
 
-  def _verifyPadfileSize(self):
+  def _verifyPadfileSize():
     """Helper for init. Verifies all pad sizes."""
     for i in reversed(range(len(self.metadata.current))):
       entry = self.metadata.current[i]
@@ -320,12 +320,11 @@ class Pad(object):
         # least try to decrypt.
         entry.consumeEntireFile()
 
-  def __init__(self, fs):
+  def __init__(self, fs, fsck=False):
     """Opens a pad. If create is True, will initialize
        the pad if it does not exist."""
     self._fs = fs
     self._uncomitted = 0
-    self.metadata = None
     if not self._fs.exists("."):
       raise InvalidPad("No such file or directory.")
     
@@ -348,7 +347,7 @@ class Pad(object):
     self.flush()
 
   def _checkInvariant(self):
-    assert self._uncomitted in (0, 1) and self.metadata is not None
+    assert self._uncomitted in (0, 1)
 
   def flush(self):
     """Flush the pad's current state to disk but do not close it. This will

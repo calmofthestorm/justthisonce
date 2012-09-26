@@ -1,5 +1,7 @@
 import itertools
+import shutil
 import sys
+import tempfile
 import unittest
 
 from justthisonce.pad import *
@@ -13,8 +15,8 @@ class test_File(unittest.TestCase):
     self.assertEqual(padfile, pf)
     return ival
 
-  def test_File(self):
-    """Tests the simple file class."""
+  def test_lifecycle(self):
+    """Tests a lifecycle use of the file class."""
     a = File("myfile", 50, "current")
     self.assertEqual(a.free, 50)
     self.assertEqual(a.path, ("current", "myfile"))
@@ -26,16 +28,16 @@ class test_File(unittest.TestCase):
     # This allocation will overlap, so not both may be committed. This is
     # enforced in the Pad, but here we should get an invariant warning.
     alloc2 = self._process_alloc_to_ival(a.getAllocation(5), a, 5)
-    a.commitInterval(alloc)
-    self.assertRaises(AssertionError, a.commitInterval, alloc2)
+    a.commitAllocation(alloc)
+    self.assertRaises(AssertionError, a.commitAllocation, alloc2)
 
     # Can't commit twice!
-    self.assertRaises(AssertionError, a.commitInterval, alloc)
+    self.assertRaises(AssertionError, a.commitAllocation, alloc)
 
     # But it should work if we get a new one
     alloc2 = self._process_alloc_to_ival(a.getAllocation(5), a, 5)
     self.assertEqual(len(alloc2), 5)
-    a.commitInterval(alloc2)
+    a.commitAllocation(alloc2)
     self.assertEqual(a.free, 10)
     self.assertEqual(a.used, 40)
 
@@ -48,32 +50,33 @@ class test_File(unittest.TestCase):
 
     # Let's fill it up.
     alloc = self._process_alloc_to_ival(a.getAllocation(9), a, 9)
-    a.commitInterval(alloc)
+    a.commitAllocation(alloc)
     self.assertEqual(a.free, 1)
     self.assertEqual(a.used, 49)
 
     alloc = self._process_alloc_to_ival(a.getAllocation(1), a, 1)
-    a.commitInterval(alloc)
+    a.commitAllocation(alloc)
     self.assertEqual(a.free, 0)
     self.assertEqual(a.used, 50)
     self.assertRaises(OutOfPad, a.getAllocation, 11)
 
   def test_consumeEntireFile(self):
-    """Tests consumeEntireFile"""
-    def consumeAndTest(padfile):
-      a.consumeEntireFile()
-      self.assertEqual(a.free, 0)
-      self.assertEqual(a.used, a.size)
+    """Tests that consumeEntireFile works."""
+    fi = File("myfile", 0, "current")
+    fi.consumeEntireFile()
+    self.assertEqual(fi.free, 0)
+    
+    fi = File("myfile", 50, "incoming")
+    fi.commitAllocation(self._process_alloc_to_ival(fi.getAllocation(25),
+                                                    fi, 25))
+    self.assertEqual(fi.free, 25)
+    fi.consumeEntireFile()
+    self.assertEqual(fi.free, 0)
 
-    a = File("myfile", 50, "current")
-    a.commitInterval(Interval())
-    consumeAndTest(a)
-
-    a = File("myfile", 0, "current")
-    consumeAndTest(a)
-
-    a = File("myfile", 75, "current")
-    consumeAndTest(a)
+    fi = File("myfile", 5, "spent")
+    fi.commitAllocation(self._process_alloc_to_ival(fi.getAllocation(5),
+                                                    fi, 5))
+    self.assertEqual(fi.free, 0)
 
 class test_Allocation(unittest.TestCase):
   def setUp(self):
@@ -108,12 +111,13 @@ class test_Allocation(unittest.TestCase):
 
     # Test a few combinations of file size and interval that should work.
     for (filesize, istart, ilen) in \
-        [(10, 0, 10), (2000, 50, 100), (100, 0, 5), (100, 90, 10), (10, 5, 0)]:
+        [(10, 0, 10), (2000, 50, 100), (100, 0, 5), (100, 90, 10)]:
       a, files, padfile = self._make_test_allocation(filesize, istart, ilen)
       self.assertEqual(len(a), ilen)
       self.assertEqual(files, [(Interval.fromAtom(istart, ilen), padfile)])
 
-    # Must not exceed file bounds.
+    # 0-length intervals violate the invariant, as do those that exceed
+    # file bounds.
     for (filesize, istart, ilen) in \
         [(10, 5, 15), (10, 12, 5), (10, -5, 5), (10, 5, -2)]:
       self.assertRaises(AssertionError,
@@ -189,7 +193,7 @@ class test_Allocation(unittest.TestCase):
     # Both have the same file
     a, a_files, padfile = self._make_test_allocation(250, 10, 20)
     b, b_files, padfile = self._make_test_allocation(250, 30, 50,
-                                                       padfile=padfile)
+                                                     padfile=padfile)
     self.assertNotEqual(a, b)
     a, b = self._symmetric_union(a, b)
     self._assert_equal_no_order(a, b)
@@ -209,8 +213,144 @@ class test_Allocation(unittest.TestCase):
     self.assertEqual(len(b), 64)
     self.assertEqual(len(a), 64)
 
-class test_Pad(unittest.TestCase):
-  pass
+class test_Filesystem(unittest.TestCase):
+  def test_sanity(self):
+    """Simple sanity checks."""
+    # We don't support root because it makes things harder and is not a useful
+    # feature.
+    self.assertRaises(AssertionError, Filesystem, "/")
+
+  def setUp(self):
+    """Creates an empty filesystem."""
+    self.fsdir = tempfile.mkdtemp()
+    self.fsroot = os.path.split(self.fsdir)
+    self.fs = Filesystem(self.fsdir)
+
+  def _populate(self):
+    """Populates the test fs with some files."""
+    for subdir in "current", "incoming", "spent":
+      self.fs.mkdir(subdir)
+      self.fs.open((subdir, "%spad" % subdir[0]), 'w')
+
+  def tearDown(self):
+    """Cleans up the generated files."""
+    assert self.fsdir.startswith(tempfile.gettempdir())
+    shutil.rmtree(self.fsdir)
+
+  def test_relpath(self):
+    """Tests relpath"""
+    # We SHOULD be able to see the root of the dir
+    self.assertEqual(self.fsdir, self.fs._relpath(self.fsroot))
+    self.assertEqual(self.fsdir, self.fs._relpath(self.fsdir))
+    self.assertEqual(self.fsdir, self.fs._relpath((self.fsdir,)))
+    self.assertEqual(self.fsdir, self.fs._relpath("."))
+    self.assertEqual(self.fsdir, self.fs._relpath((".",)))
+
+    # We SHOULD be able to see files under the dir
+    self.assertEqual(self.fsdir + "/a/b/c", self.fs._relpath(("a", "b", "c")))
+    self.assertEqual(self.fsdir + "/a/b/c", self.fs._relpath("a/b/c"))
+    self.assertEqual(self.fsdir + "/a/b/c", self.fs._relpath(("a/b", "c")))
+
+    # We should NOT be able to do evil things.
+    self.assertRaises(AssertionError, self.fs._relpath, ("/"))
+    self.assertRaises(AssertionError, self.fs._relpath, (("../etc", "shadow")))
+    self.assertRaises(AssertionError, self.fs._relpath, (("../etc/shadow")))
+    self.assertRaises(AssertionError, self.fs._relpath, (("../../etc/shadow")))
+    self.assertRaises(AssertionError, self.fs._relpath, \
+                      (("..", "..", "..", "etc", "shadow")))
+
+    # Even if we ask nicely.
+    self.assertRaises(AssertionError, self.fs._relpath, (("/", "etc", "shadow")))
+
+    # Or strangely
+    self.assertRaises(AssertionError, self.fs._relpath, ((u"/etc/shadow")))
+    self.assertRaises(AssertionError, self.fs._relpath, (("/etc/shadow",)))
+    self.assertRaises(AssertionError, self.fs._relpath, (("/", "etc", "shadow")))
+    self.assertRaises(AssertionError, self.fs._relpath, \
+                      (("..", u"..", "..", u"etc", "shadow")))
+
+  def test_mkdir(self):
+    """Tests mkdir"""
+    self.fs.mkdir("current")
+    self.fs.mkdir("current/more")
+    self.assertRaises(OSError, self.fs.mkdir, "current/more/")
+    self.assertRaises(OSError, self.fs.mkdir, "current/more/is/less")
+    self.assertRaises(AssertionError, self.fs.mkdir, "/evil")
+    self.assertRaises(AssertionError, self.fs.mkdir, "../evil")
+
+    self.fs.setReadonly()
+    self.assertRaises(AssertionError, self.fs.mkdir, "currente")
+    self.assertRaises(AssertionError, self.fs.mkdir, ("currente", "moree"))
+
+  def test_exists(self):
+    """Tests exists"""
+    self.assertFalse(self.fs.exists("current"))
+    self.assertFalse(self.fs.exists(("current", "padfile")))
+    self._populate()
+    self.assertFalse(self.fs.exists(("current", "padfile")))
+    self.assertTrue(self.fs.exists(("current", "cpad")))
+    self.assertTrue(self.fs.exists("spent"))
+    self.assertFalse(self.fs.exists(("current", "spad")))
+    self.assertTrue(self.fs.exists(("spent", "spad")))
+
+    self.fs.setReadonly()
+    self.assertFalse(self.fs.exists(("current", "spad")))
+    self.assertTrue(self.fs.exists(("spent", "spad")))
+
+  def test_stat(self):
+    """Tests stat"""
+    self._populate()
+    for testpath in [("current",), ("current", "cpad"), (".",)]:
+      self.assertEqual(os.stat(os.path.join(self.fsdir, *testpath)), \
+                       self.fs.stat(testpath))
+
+    self.fs.setReadonly()
+    self.fs.stat(("current", "cpad"))
+
+  def test_listdir(self):
+    """Tests listdir"""
+    self.assertEqual(self.fs.listdir("."), [])
+    self._populate()
+    self.assertEqual(set(self.fs.listdir(".")), \
+                     set(["current", "spent", "incoming"]))
+    for subdir in "current", "incoming", "spent":
+      self.assertEqual(self.fs.listdir(subdir), ["%spad" % subdir[0]])
+      self.assertRaises(OSError, self.fs.listdir, (subdir, "%spad" % subdir[0]))
+      self.assertRaises(OSError, self.fs.listdir, (subdir, "%spad_dne" % subdir[0]))
+
+
+    self.fs.setReadonly()
+    self.assertEqual(set(self.fs.listdir(".")), \
+                     set(["current", "spent", "incoming"]))
+
+  def test_rename(self):
+    """Tests rename"""
+    self.assertRaises(OSError, self.fs.rename, "current", "currant")
+    self._populate()
+    self.fs.rename("current", "currant")
+    self.fs.rename("currant", "current")
+    self.fs.rename(("spent", "spad"), ("current", "cpad"))
+    self.assertRaises(OSError, self.fs.rename, ("spent", "spad"),
+                      ("current", "cpad"))
+    self.assertFalse(self.fs.exists(("spent", "cpad")))
+    self.assertFalse(self.fs.exists(("spent", "spad")))
+    self.assertTrue(self.fs.exists(("current", "cpad")))
+
+    self.fs.setReadonly()
+    self.assertRaises(AssertionError, self.fs.rename, ("incoming", "ipad"),
+                      ("current", "ipad"))
+
+  def test_open(self):
+    """Tests open"""
+    self._populate()
+    self.assertEqual(self.fs.open(("current", "cpad")).read(), "")
+    self.assertRaises(IOError, self.fs.open, ("current", "foo"))
+    self.fs.open(("current", "foo"), 'w').write("Hello")
+    self.assertEqual(self.fs.open(("current", "foo")).read(), "Hello")
+
+    self.fs.setReadonly()
+    self.assertRaises(AssertionError, self.fs.open, ("current", "food"), 'w')
+    self.assertEqual(self.fs.open(("current", "foo")).read(), "Hello")
 
 if __name__ == '__main__':
   unittest.main()
