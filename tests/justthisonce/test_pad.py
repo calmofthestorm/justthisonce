@@ -1,8 +1,12 @@
 import itertools
+import mock
 import shutil
 import sys
 import tempfile
 import unittest
+
+from cStringIO import StringIO
+import cPickle as pickle
 
 from justthisonce.pad import *
 
@@ -351,6 +355,51 @@ class test_Filesystem(unittest.TestCase):
     self.fs.setReadonly()
     self.assertRaises(AssertionError, self.fs.open, ("current", "food"), 'w')
     self.assertEqual(self.fs.open(("current", "foo")).read(), "Hello")
+
+class test_Pad(unittest.TestCase):
+  def setUp(self):
+    self.fs = mock.create_autospec(Filesystem)
+
+  def test_createPad_normal(self):
+    """Tests create pad when nothing goes wrong."""
+    # verify we create the structure when everything works
+    fs = self.fs("/tmp")
+    def verify_created(fs):
+      fs.open.side_effect = metadata, version = [StringIO(), StringIO()]
+
+      Pad.createPad(fs)
+      fs.open.assert_has_calls([mock.call("metadata.pck", 'w'),
+                                mock.call("VERSION", 'w')])
+
+      self.assertEqual(pickle.loads(metadata.getvalue()).__dict__,
+                       Metadata().__dict__)
+      self.assertEqual(version.getvalue(), "%s\n%s" % (COMPAT, VERSION))
+      fs.mkdir.assert_any_call("current")
+      fs.mkdir.assert_any_call("spent")
+      fs.mkdir.assert_any_call("incoming")
+
+    # Should work if the dir is empty OR does not exist. Must make if does not
+    # exist, must check empty if does.
+    fs.exists.return_value = False
+    fs.listdir.side_effect = OSError
+    verify_created(fs)
+    fs.mkdir.assert_any_call(".")
+
+    fs.reset_mock()
+    fs.exists.return_value = True
+    fs.listdir.side_effect = None
+    fs.listdir.return_value = []
+    verify_created(fs)
+    fs.listdir.assert_called_with(".")
+
+  def test_createPad_error(self):
+    """Tests some failure modes of createPad."""
+
+    # Dir exists but has a file/subdir
+    fs = self.fs("/tmp")
+    fs.listdir.return_value = ["foo"]
+    fs.exists.side_effect = lambda x: x in (".", "foo")
+    self.assertRaises(InvalidPad, Pad.createPad, fs)
 
 if __name__ == '__main__':
   unittest.main()

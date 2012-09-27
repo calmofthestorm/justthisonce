@@ -172,8 +172,8 @@ class Metadata(object):
 
   def __init__(self):
     self.current = []
-    self.compatability = None
-    self.version = None
+    self.compatability = COMPAT
+    self.version = VERSION
 
 class Filesystem(object):
   """Shim class to abstract interactions with the filesystem. This makes it
@@ -238,7 +238,7 @@ class Pad(object):
   @classmethod
   def createPad(cls, fs):
     """Creates a new pad on the provided fs. Will not clobber an
-       exinting non-emptf directory."""
+       existing non-empty directory."""
     if fs.exists("."):
       if fs.listdir("."):
         raise InvalidPad("Directory exists and is not empty.")
