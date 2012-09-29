@@ -10,6 +10,17 @@ import cPickle as pickle
 
 from justthisonce.pad import *
 
+def sideEffect(**kw):
+  """Returns a side effect function for mocks. Will return K:V for given. As a
+     special case, will raise exception values."""
+  def effector(k):
+    v = kw[k]
+    if isinstance(v, Exception):
+      raise v
+    else:
+      return v
+  return effector
+
 class test_File(unittest.TestCase):
   def _process_alloc_to_ival(self, alloc, padfile, length):
     files = list(alloc.iterFiles())
@@ -401,5 +412,105 @@ class test_Pad(unittest.TestCase):
     fs.exists.side_effect = lambda x: x in (".", "foo")
     self.assertRaises(InvalidPad, Pad.createPad, fs)
 
+  class InitBypass(Pad):
+    """Class used to bypass init so it can be tested componentwise. We could
+       go to a construct / initialize workflow but this seems more Pythonic."""
+    def __init__(self):
+      pass
+
+  def test__loadMetadata(self):
+    """Tests _loadMetadata (init helper)"""
+
+    # Test missing metadata
+    pad = self.InitBypass()
+    pad._fs = self.fs("/tmp")
+    pad._fs.open.side_effect = \
+        sideEffect(VERSION=StringIO("%s\n%s" % (COMPAT, VERSION)), \
+                   **{"metadata.pck":IOError()})
+    self.assertRaisesRegexp(InvalidPad, "Metadata missing or corrupt",
+                            pad._loadMetadata)
+
+    # Test missing version
+    pad = self.InitBypass()
+    pad._fs = self.fs("/tmp")
+    pad._fs.open.side_effect = \
+        sideEffect(**{"VERSION":IOError(),
+                      "metadata.pck":StringIO(cPickle.dumps(Metadata()))})
+    self.assertRaisesRegexp(InvalidPad, "Version missing or corrupt",
+                            pad._loadMetadata)
+
+    # Test corrupt metadata
+    pad = self.InitBypass()
+    pad._fs = self.fs("/tmp")
+    pad._fs.open.side_effect = \
+        sideEffect(**{"VERSION":StringIO("%s\n%s" % (COMPAT, VERSION)),
+                      "metadata.pck":StringIO("a" + cPickle.dumps(Metadata()))})
+    self.assertRaisesRegexp(InvalidPad, "Metadata missing or corrupt",
+                            pad._loadMetadata)
+
+    # Test corrupt version
+    pad = self.InitBypass()
+    pad._fs = self.fs("/tmp")
+    pad._fs.open.side_effect = lambda fn: files[fn]
+    pad._fs.open.side_effect = \
+        sideEffect(**{"VERSION":StringIO("Potato\n13"),
+                      "metadata.pck":StringIO(cPickle.dumps(Metadata()))})
+    self.assertRaisesRegexp(InvalidPad, "Version missing or corrupt",
+                            pad._loadMetadata)
+
+    # Test newer and older version, as well as current one.
+    for version in range(VERSION - 1, VERSION + 2):
+      for compat in range(COMPAT - 1, COMPAT + 1):
+        # Test everything works
+        pad = self.InitBypass()
+        pad._fs = self.fs("/tmp")
+        files = {"metadata.pck":StringIO(cPickle.dumps(Metadata())), \
+                 "VERSION":StringIO("%s\n%s" % (compat, version))}
+        pad._fs.open.side_effect = sideEffect(**files)
+        pad._loadMetadata()
+
+    # Test incompat version
+    pad = self.InitBypass()
+    pad._fs = self.fs("/tmp")
+    files = {"metadata.pck":StringIO(cPickle.dumps(Metadata())), \
+             "VERSION":StringIO("%s\n%s" % (COMPAT + 1, VERSION + 1))}
+    pad._fs.open.side_effect = lambda fn: files[fn]
+    self.assertRaisesRegexp(InvalidPad, "Pad is protocol.*but I only understand.*", \
+                            pad._loadMetadata)
+
+  def test__verifyDirStructure(self):
+    """Tests _verifyDirStructure (init helper)"""
+    # Test all good
+    pad = self.InitBypass()
+    pad._fs = self.fs("/tmp")
+    pad._fs.exists.side_effect = lambda fn: fn in ("incoming", "spent", "current")
+
+    # Empty dir
+    pad._fs.listdir.return_value = []
+    pad._verifyDirStructure()
+
+    # Now with some conflicting files
+    pad._fs.listdir.side_effect = sideEffect(incoming="ab", spent="bc",
+                                             current="d")
+    self.assertRaisesRegexp(InvalidPad, "Duplicate pad filenames.*", \
+                            pad._verifyDirStructure)
+
+    # Now with some files that do not conflict
+    pad._fs.listdir.side_effect = sideEffect(incoming="abgde", spent="yz",
+                                             current="t")
+    pad._verifyDirStructure()
+    pad._fs.listdir.side_effect = sideEffect(incoming="a", spent="b", current="")
+    pad._verifyDirStructure()
+
+    # Now a directiory is missing
+    pad._fs.exists.side_effect = lambda fn: fn in ("incoming", "spent")
+    self.assertRaisesRegexp(InvalidPad, "Directory structure bad", \
+                            pad._verifyDirStructure)
+    pad._fs.exists.side_effect = lambda fn: fn in ("incoming", "current")
+    self.assertRaisesRegexp(InvalidPad, "Directory structure bad", \
+                            pad._verifyDirStructure)
+
 if __name__ == '__main__':
   unittest.main()
+
+
