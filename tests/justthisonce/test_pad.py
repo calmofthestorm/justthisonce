@@ -371,6 +371,19 @@ class test_Pad(unittest.TestCase):
   def setUp(self):
     self.fs = mock.create_autospec(Filesystem)
 
+  def make_file_objs(self, files):
+    """Pass in a dict of filename to (size, spent). Returns a current list
+       as for Metadata."""
+    current = []
+    for (k, v) in files.iteritems():
+      noob = File(k, v[0], "current")
+      if v[1] > 0:
+        assert v[1] <= v[0]
+        alloc = noob.getAllocation(v[1])
+        noob.commitAllocation(alloc.iterFiles().next()[0])
+      current.append(noob)
+    return current
+
   def test_createPad_normal(self):
     """Tests create pad when nothing goes wrong."""
     # verify we create the structure when everything works
@@ -510,7 +523,106 @@ class test_Pad(unittest.TestCase):
     self.assertRaisesRegexp(InvalidPad, "Directory structure bad", \
                             pad._verifyDirStructure)
 
+  def test__findMissingPads(self):
+    """Tests the init helper _findMissingPads"""
+    pad = self.InitBypass()
+    pad._fs = self.fs("/tmp")
+    pad.metadata = Metadata()
+
+    def test_worked(current=[]):
+      pad._findMissingPads()
+      self.assertIsNone(pad._fs.setReadonly.call_args)
+      self.assertEqual(current, pad.metadata.current)
+      pad._fs.reset_mock()
+
+    # No current should pass just fine
+    test_worked()
+
+    # The fake files are (size, used)
+    cfiles = {"foo":(30, 3), "bar":(45, 6), "baz2":(0, 0)}
+    sfiles = {"baz":(60, 60), "foodbar":(0, 0)}
+    ifiles = {"foobar":(120, 0)}
+    def exister_maker(cfiles, ifiles, sfiles):
+      def exister(fn):
+        if isinstance(fn, basestring):
+          fn = fn,
+        if fn[0] == "current":
+          return len(fn) == 1 or (len(fn) == 2 and fn[1] in cfiles)
+        if fn[0] == "incoming":
+          return len(fn) == 1 or (len(fn) == 2 and fn[1] in ifiles)
+        if fn[0] == "spent":
+          return len(fn) == 1 or (len(fn) == 2 and fn[1] in sfiles)
+        return False
+      return exister
+
+    # Current all exist
+    current = self.make_file_objs(cfiles)
+    pad.metadata.current = current[:]
+    test_worked(current)
+
+    # File missing and not found elsewhere
+    for used in (0, 0.5, 1):
+      with mock.patch.dict(cfiles):
+        pad._fs.reset_mock()
+        pad._fs.exists.side_effect = exister_maker(cfiles, ifiles, sfiles)
+        size, spent = cfiles["bar"]
+        cfiles["bar"] = (size, int(used * size))
+        current = self.make_file_objs(cfiles)
+        pad.metadata.current = current[:]
+        del cfiles["bar"]
+        pad._findMissingPads()
+        pad._fs.setReadonly.assert_called_with()
+  
+        for fil in pad.metadata.current:
+          self.assertIn(fil.filename, cfiles)
+          self.assertEqual(fil.used, cfiles[fil.filename][1])
+          self.assertEqual(fil.subdir, "current")
+          del cfiles[fil.filename]
+        self.assertEqual(len(cfiles), 0)
+
+    # Padfile found in incoming/spent but expected in current
+    for elsewhere in "incoming", "spent":
+      pad._fs.reset_mock()
+      current = self.make_file_objs(cfiles)
+
+      # Set it up to expect the pads that we just generated, then
+      # move one somewhere else on "disk".
+      with mock.patch.dict(cfiles), mock.patch.dict(ifiles), \
+           mock.patch.dict(sfiles):
+        pad._fs.exists.side_effect = exister_maker(cfiles, ifiles, sfiles)
+        pad.metadata.current = current[:]
+
+        # Move the pad from current on "disk"
+        if elsewhere == "incoming":
+          ifiles["bar"] = cfiles["bar"]
+        elif elsewhere == "spent":
+          sfiles["bar"] = cfiles["bar"]
+        else:
+          assert False
+        del cfiles["bar"]
+  
+        # Perform the test. The pad must be set read-only.
+        pad._findMissingPads()
+        pad._fs.setReadonly.assert_called_with()
+    
+      # This mock is to simplify deletion. For each pad in spent, make sure
+      # the recovery treated it properly.
+      with mock.patch.dict(cfiles):
+        for fil in pad.metadata.current:
+          self.assertIn(fil.filename, cfiles)
+          if elsewhere == "incoming":
+            self.assertEqual(fil.used, cfiles[fil.filename][1])
+
+          if fil.subdir == "current":
+            del cfiles[fil.filename]
+          else:
+            bar = fil
+        self.assertEqual(len(cfiles), 1)
+        self.assertEqual(bar.filename, "bar")
+        self.assertEqual(bar.subdir, elsewhere)
+
+        if elsewhere == "spent":
+          self.assertEqual(bar.used, cfiles[bar.filename][0])
+
 if __name__ == '__main__':
   unittest.main()
-
-

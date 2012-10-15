@@ -289,29 +289,33 @@ class Pad(object):
       entry = self.metadata.current[i]
       assert entry.subdir == "current"
       if not self._fs.exists((entry.subdir, entry.filename)):
-        if entry.used in (0, entry.size):
-          # Unused or consumed pad found in current. This is probably ok.
-          self._fs.set_readonly()
+        if entry.used == 0:
+          # Unused pad missing from current.
+          self._fs.setReadonly()
           del self.metadata.current[i]
         elif self._fs.exists(("incoming", entry.filename)):
           # Padfile found in incoming but expected in current.
-          self._fs.set_readonly()
+          self._fs.setReadonly()
           entry.subdir = "incoming"
         elif self._fs.exists(("spent", entry.filename)):
           # Pad found in spent but was not marked as used up in metadata.
-          self._fs.set_readonly()
+          self._fs.setReadonly()
           entry.subdir = "spent"
           entry.consumeEntireFile()
+        elif entry.used == entry.size:
+          # Fully used pad missing from current.
+          self._fs.setReadonly()
+          del self.metadata.current[i]
         else:
-          # Missing non-unused padfile.
-          self._fs.set_readonly()
+          # Missing non-unused/full padfile.
+          self._fs.setReadonly()
           del self.metadata.current[i]
 
-  def _verifyPadfileSize():
+  def _verifyPadfileSize(self):
     """Helper for init. Verifies all pad sizes."""
     for i in reversed(range(len(self.metadata.current))):
       entry = self.metadata.current[i]
-      actual = self._fs.stat(("current", entry.filename))
+      actual = self._fs.stat(("current", entry.filename)).st_size
       if entry.size != actual:
         # Current pad file changed size
         self._fs.set_readonly()
@@ -319,6 +323,8 @@ class Pad(object):
         # Can't trust it anymore. Mark it as spent but don't delete so can at
         # least try to decrypt.
         entry.consumeEntireFile()
+        entry.size = actual
+        entry.spent = min(actual, entry.spent)
 
   def __init__(self, fs, fsck=False):
     """Opens a pad. If create is True, will initialize
