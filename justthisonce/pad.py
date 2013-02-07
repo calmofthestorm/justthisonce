@@ -94,7 +94,7 @@ class File(object):
     self._extents = Interval.fromAtom(0, self.size)
 
 class Allocation(object):
-  """Holds an allocation on te pad, which may contain multiple chunks in
+  """Holds an allocation on the pad, which may contain multiple chunks in
      multiple files. They may be constructed with union-like updates."""
   __metaclass__ = invariant.EnforceInvariant
 
@@ -159,7 +159,19 @@ class Allocation(object):
   def iterFiles(self):
     """Returns an iterator of (interval, file)."""
     return self._alloc.itervalues()
-  
+
+  def get_serialization_state(self):
+    """Helper for the serialization code. Only it should call this. This is a
+       compromise between dumping internal logic code into message.py and dumping
+       [potentially] legacy parsing code into pad.
+
+       This provides an abstraction between the on-disk format and the internal
+       representation. This format is a sequence of (filename, atoms) pairs
+       where atoms is (start, length) pairs."""
+    return (((filename, interval.toAtoms())
+             for (filename, (interval, padfile))
+             in self._alloc.iteritems()))
+
   def __eq__(self, other):
     # Order matters!
     return self._size == other._size and self._alloc == other._alloc
