@@ -12,7 +12,7 @@ class Interval(object):
   def __init__(self):
     """Creates an empty interval"""
     self._size = 0
-    self._extents = []
+    self._extents = ()
 
   @classmethod
   def fromAtom(klass, start, length):
@@ -20,7 +20,7 @@ class Interval(object):
        of specified start and length. Length must be >= 0."""
     atom = Interval()
     if length != 0:
-      atom._extents = [(start, length)]
+      atom._extents = ((start, length),)
     atom._size = length
     atom._checkInvariant()
     return atom
@@ -31,7 +31,7 @@ class Interval(object):
        (start, length) pairs. They need not be sorted and zero-length atoms
        are allowed, but all atoms must be disjoint."""
     atom = Interval()
-    atom._extents = sorted([a for a in atoms if a[1] != 0])
+    atom._extents = tuple(sorted([a for a in atoms if a[1] != 0]))
     if not atom._extents:
       atom._size = 0
     else:
@@ -44,6 +44,7 @@ class Interval(object):
 
   def _checkInvariant(self):
     assert self._size >= 0
+    assert type(self._extents) is tuple
     ptr = 0
     used = 0
     for (start, length) in self._extents:
@@ -61,6 +62,11 @@ class Interval(object):
 
   def __ne__(self, other):
     return not self.__eq__(other)
+
+  def toAtoms(self):
+    """Converts the interval to a series of (start, length) pairs which are
+       guaranteed not to overlap."""
+    return tuple(self._extents)
 
   def iterInterior(self):
     """Returns an iterator over chunks of the interval that are "inside" the
@@ -130,7 +136,7 @@ class Interval(object):
       merged.append((start_cur, length_cur))
 
     rval = Interval()
-    rval._extents = merged
+    rval._extents = tuple(merged)
     rval._size = merged_size
     return rval
  
