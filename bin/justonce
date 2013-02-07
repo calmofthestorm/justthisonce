@@ -1,9 +1,93 @@
 #!/usr/bin/env python
 
-import sys, os
+import sys, os, argparse, collections
 
 def main():
-  pass
+  args = make_cli_parser().parse_args()
+
+def make_prefix_aliases(commands):
+  """Generates all prefixes of a string as aliases for it to simplify the
+     UP. Pity argparse doesn't do this already where safe -- this is
+     terribly inefficient. Unfortunately, old argparse can't use this."""
+  # Mapping from alias to its command.
+  taken = {}
+
+  for command in commands:
+    for i in range(1, len(command)):
+      alias = command[:i]
+      if alias in taken:
+        taken[alias] = None
+      else:
+        taken[alias] = command
+
+  # Return mapping from unambiguous aliases to commands. Ambiguous aliases are
+  # under key None.
+  rval = collections.defaultdict(list)
+  for (alias, command) in taken.iteritems():
+    rval[command].append(alias)
+  return rval
+
+def make_cli_parser():
+  parser = argparse.ArgumentParser()
+
+  # Generate unambiguous prefixes. argparse really should do this automagically
+  # as this is likely less efficient.
+  aliases = make_prefix_aliases(("encrypt", "decrypt", "pad"))
+
+  parser.add_argument("paddir")
+  parser.add_argument("-i", "--interactive", action="store_true",
+                      help="Prompt before clobbering output files that exist.")
+  parser.add_argument("-t", "--no-trace", action="store_true",
+                      help="Do not modify the pad in any way. DANGEROUS.")
+  parser.add_argument("-f", "--force", action="store_true",
+                      help="Do not prompt before doing dangerous things.")
+  parser.add_argument("-v", "--verbose", action="store_true",
+                      help="Talk more.")
+  parser.add_argument("--version", action="store_true")
+
+  subparsers = parser.add_subparsers(title="subcommands")
+  def make_subparser(command):
+    """Makes a subparser for the selected command and sets the aliases
+       appropriately."""
+    try:
+      subparser = subparsers.add_parser(command, aliases=aliases[command])
+    except TypeError, ex:
+      # Workaround for http://bugs.python.org/issue13879
+      if ex.args != ("__init__() got an unexpected keyword argument 'aliases'",):
+        raise
+      subparser = subparsers.add_parser(command)
+    return subparser
+
+  # Encryption commands
+  c_encrypt = make_subparser("encrypt")
+  c_encrypt.add_argument("--no-hash", action="store_true",
+                         help="Do not include a hash of message contents.")
+
+  # Decryption commands
+  c_decrypt = subparsers.add_parser("decrypt")
+
+  # Arguments common to encryption and decryption.
+  for cmd in (c_encrypt, c_decrypt):
+    cmd.add_argument("infile")
+    cmd.add_argument("outfile")
+    cmd.add_argument("-n", "--notification",
+                     help="Also generate a pad use notification.")
+    cmd.add_argument("-z", "--zero-pad",
+                     help="Zero the region used so this paddir cannot decrypt "
+                          "the message.")
+
+  # Misc pad management commands
+  c_pad = subparsers.add_parser("pad", description="Pad management")
+  c_pad.add_argument("-n", "--notification",
+                     help="Generate a pad use notification for all portions of"
+                          "this pad that have been used.")
+  c_pad.add_argument("-p", "--process-notification",
+                     help="Read an encrypted message or pad use notification"
+                          " and mark that region used.")
+  c_pad.add_argument("-c", "--convert",
+                     help="Generate a pad use notification from a message.")
+
+  return parser
 
 if __name__ == "__main__":
   main()
