@@ -231,5 +231,43 @@ class test_Interval(unittest.TestCase):
     self.assertIsNone(ival.min())
     self.assertIsNone(ival.max())
 
+  def test_union_overlap(self):
+    """Test that union works correctly when overlap is enabled."""
+    a = Interval.fromAtom(5, 10)
+    b = Interval.fromAtom(10, 10)
+    self.assertEqual(a.union(b, allow_overlap=True), Interval.fromAtom(5, 15))
+
+    a = Interval.fromAtom(5, 5)
+    b = Interval.fromAtom(5, 15)
+    self.assertEqual(a.union(b, allow_overlap=True), Interval.fromAtom(5, 15))
+
+    a = Interval.fromAtom(5, 20)
+    b = Interval.fromAtom(10, 15)
+    self.assertEqual(a.union(b, allow_overlap=True), Interval.fromAtom(5, 20))
+
+    a = Interval.fromAtom(10, 5)
+    b = Interval.fromAtom(5, 15)
+    self.assertEqual(a.union(b, allow_overlap=True), Interval.fromAtom(5, 15))
+
+  def test_union_overlap_symmetry(self):
+    """Test that the order does not matter."""
+
+    for (a, b) in [(Interval.fromAtom(5, 10), Interval.fromAtom(10, 10)),
+                   (Interval.fromAtom(5, 5), Interval.fromAtom(5, 15)),
+                   (Interval.fromAtom(5, 20), Interval.fromAtom(10, 15)),
+                   (Interval.fromAtom(10, 5), Interval.fromAtom(5, 15))]:
+      self.assertEqual(a.union(b, allow_overlap=True), 
+                       b.union(a, allow_overlap=True))
+
+  def test_union_overlap_compound(self):
+    """Test some compound cases of union with overlap."""
+    a = Interval.fromAtoms([(5, 10), (20, 10), (50, 50)])
+    b = Interval.fromAtoms([(0, 8), (10, 15), (28, 82)])
+    self.assertEqual(a.union(b, True), b.union(a, True))
+    self.assertEqual(a.union(b, True), Interval.fromAtom(0, 110))
+
+    b = Interval.fromAtoms([(0, 8), (28, 82)])
+    self.assertEqual(a.union(b, True), Interval.fromAtoms([(0, 15), (20, 90)]))
+
 if __name__ == '__main__':
   unittest.main()

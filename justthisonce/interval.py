@@ -93,7 +93,7 @@ class Interval(object):
     if total_length is not None and ptr < total_length:
       yield (ptr, total_length - ptr)
 
-  def union(self, other):
+  def union(self, other, allow_overlap=False):
     """Returns a new interval that is the union of the two supplied.
        The arguments must be disjoint."""
     # Need to merge intervals
@@ -117,8 +117,15 @@ class Interval(object):
         start, length = other._extents[other_i]
         other_i += 1
 
-      # Intervals may not overlap.
-      assert start >= start_cur + length_cur
+      assert allow_overlap or start >= start_cur + length_cur
+
+      # Convert overlapping intervals to equivalent non-overlapping ones.
+      if allow_overlap and start < start_cur + length_cur:
+        # Containment is a no-op.
+        if start + length < start_cur + length_cur:
+          continue
+        length -= start_cur + length_cur - start
+        start = start_cur + length_cur
 
       if start == start_cur + length_cur:
         # We can merge this with the current interval.
