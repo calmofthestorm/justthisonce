@@ -6,55 +6,12 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 
-const int BUFFER_LENGTH = 4 * 1024 * 1024;
+#include "cxor.h"
 
 static inline size_t min(size_t a, size_t b) {
   return a > b ? b : a;
 }
 
-/* Keep reading until you get all the bytes. */
-void readbuf(char* buffer, int file, size_t chunk) {
-  while (chunk > 0) {
-    int res = read(file, buffer, chunk);
-    assert(res >= 0);
-    buffer += res;
-    chunk -= res;
-  }
-}
-
-/* Keep writing until done. */
-void writebuf(char* buffer, int file, size_t chunk) {
-  while (chunk > 0) {
-    int res = write(file, buffer, chunk);
-    assert(res >= 0);
-    buffer += res;
-    chunk -= res;
-  }
-}
-
-/* Structure to represent a single range in a single file to xor. */
-typedef struct {
-  size_t start;
-  size_t length;
-} Range_t;
-
-/* Structure to represent ranges in a file. It is acceptable for ranges
-   to overlap because checking for this in C is complex. */
-typedef struct {
-  size_t n_ranges;
-  char* filepath;
-  Range_t* ranges;
-  /* used internally */
-  FILE* fd;
-  char* buffer;
-  size_t size;
-  size_t range_left; /* Number of bytes in current range left */
-  size_t cur_range;  /* Index of current range */
-} File_t;
-
-/* REQUIRES: file points to a valid file structure.
-   RETURNS:  the total size of all ranges in the file. Overlapping segments
-             are counted multiple times. */
 size_t get_total_size(const File_t* file) {
   size_t total = 0;
   size_t i;
@@ -65,14 +22,8 @@ size_t get_total_size(const File_t* file) {
   return total;
 }
 
-typedef enum {SUCCESS=0, NO_WORK, SIZE_MISMATCH, OUTFILE_ERROR,
-              INFILE_ERROR, MALLOC_FAILED, INVALID_RANGE,
-              INFILE_SEEK_ERROR=-1, OUTFILE_SEEK_ERROR=-2} XorResult;
-
-/* REQUIRES: all file objects completely valid.
-   MODIFIES: the buffers and files open by the fds in the file objects
-   RETURNS:  SUCCESS (0) */
-XorResult xor_worker(File_t inputs[], size_t n_inputs, File_t* output) {
+XorResult xor_worker(File_t inputs[], size_t n_inputs, File_t* output,
+                     char* read_buf, char* write_buf) {
   size_t remaining = 0;
   size_t i;
 
@@ -89,6 +40,7 @@ XorResult xor_worker(File_t inputs[], size_t n_inputs, File_t* output) {
     }
   }
 
+
   while (1) {
     /* Read through all ranges in file. */
     while (output->range_left == 0 && ++output->cur_range < output->n_ranges) {
@@ -98,9 +50,11 @@ XorResult xor_worker(File_t inputs[], size_t n_inputs, File_t* output) {
         return OUTFILE_SEEK_ERROR;
       }
     }
+
     if (output->cur_range == output->n_ranges) {
       return SUCCESS;
     }
+
     remaining = output->cur_range;
     for (i = 0; i < n_inputs; ++i) {
       while (inputs[i].range_left == 0 && ++inputs[i].cur_range) {
@@ -121,27 +75,31 @@ XorResult xor_worker(File_t inputs[], size_t n_inputs, File_t* output) {
       /* TODO: decouple buffers from ranges to improve performance. */
       size_t len = min(remaining, BUFFER_LENGTH);
 
-      /* Read in the data we need from all files. */
-      /* TODO: we only need 2 buffers; not n+1 */
-      if (fread(output->buffer, 1, len, inputs[0].fd) != len) {
+      /* Read in the data we need from all files. Initialize the write buffer
+       * with the data from the first file. */
+      if (fread(write_buf, 1, len, inputs[0].fd) != len) {
         return INFILE_SEEK_ERROR;
       }
       for (i = 1; i < n_inputs; ++i) {
-        if (fread(inputs[i].buffer, 1, len, inputs[i].fd) != len) {
+        if (fread(read_buf, 1, len, inputs[i].fd) != len) {
           return INFILE_SEEK_ERROR;
-        }
-      }
+        } else {
+          /* Perform the encryption. Do as much as possible with longs. */
+          int j;
+          for (j = 0; j < len / sizeof(long); ++j) {
+            /* TODO: Consider using intrinsics if the compiler supports them. */
+            ((long*)write_buf)[j] ^= ((long*)read_buf)[j];
+          }
 
-      /* Perform the encryption. */
-      for (i = 1; i < n_inputs; ++i) {
-        int j;
-        for (j = 0; j < len; ++j) {
-          ((int*)output->buffer)[j] ^= ((int*)inputs[i].buffer)[j];
+          /* Finish off any partial words that are not a multiple. */
+          for (j = len - (len % sizeof(long)); j < len; ++j) {
+            write_buf[j] ^= read_buf[j];
+          }
         }
       }
 
       /* Write to the outfile */
-      fwrite(output->buffer, 1, len, output->fd);
+      int i = fwrite(write_buf, 1, len, output->fd);
 
       /* Keep track of progress */
       assert(len <= remaining);
@@ -150,31 +108,12 @@ XorResult xor_worker(File_t inputs[], size_t n_inputs, File_t* output) {
   }
 }
 
-/* REQUIRES: files is either null or a n_files long valid array of valid File_t
-             structs. outfile is null or a valid File_t. no files in files ore
-             modified on disk during the call. cleanup is caller's
-             responsibility if the return value is negative. no file occurs in
-             files more than once, outfile does not occur in files, and
-             ranges in outfile do not overlap.
-   MODIFIES: overwrites (and ignores) all files fd and buffer members.
-   EFFECTS:  will verify that all files have the same length (sum of their
-             ranges) and that all ranges are valid. If all conditions are met,
-             proceeds through the ranges in each file, computing the parity of
-             each bit and storing it in the corresponding range in outfile,
-             which will be created if it does not exist and truncated if it
-             does.
-   RETURNS:  an appropriate error code from the XorResult enum. 0 will always
-             indicate success, positive values indicate a warning, negative
-             values indicate an error and that cleanup may be necessary. */
 XorResult xor_files(File_t files[], const size_t n_files,
                     File_t* outfile) {
   size_t i;
 
   /* Total size of the range to xor. */
   size_t total_size = get_total_size(outfile);
-
-  /* Buffers to do the actual copy. */
-  char* buffer_memory = NULL;
 
   /* Return value */
   XorResult rval;
@@ -213,35 +152,33 @@ XorResult xor_files(File_t files[], const size_t n_files,
     }
   }
 
-  /* Allocate the buffers */
-  buffer_memory = malloc(BUFFER_LENGTH * (n_files + 1));
-  if (!buffer_memory) {
-    free(buffer_memory);
-    return MALLOC_FAILED;
-  }
-
   /* Create outfile */
   outfile->fd = fopen(outfile->filepath, "wb");
   if (!outfile->fd) {
-    free(buffer_memory);
     return OUTFILE_ERROR;
   }
 
-  /* Set up the buffer pointers */
-  for (i = 0; i < n_files; ++i) {
-    files[i].buffer = buffer_memory + BUFFER_LENGTH * i;
-  }
-  outfile->buffer = buffer_memory + BUFFER_LENGTH * n_files;
-
   /* All set to do the actual operation. */
   if (total_size > 0) {
-    rval = xor_worker(files, n_files, outfile);
+    /* Files are read one at a time into here. */
+    char* read_buf = malloc(BUFFER_LENGTH);
+
+    /* We accumulate the crypted data here after each read. */
+    char* write_buf = malloc(BUFFER_LENGTH);
+
+    if (read_buf && write_buf) {
+      rval = xor_worker(files, n_files, outfile, read_buf, write_buf);
+    } else {
+      rval = MALLOC_FAILED;
+    }
+
+    free(read_buf);
+    free(write_buf);
   } else {
     rval = SUCCESS;
   }
   
   /* Free all resources */
-  free(buffer_memory);
   for (i = 0; i < n_files; ++i) {
     fclose(files[i].fd);
   }
@@ -249,7 +186,3 @@ XorResult xor_files(File_t files[], const size_t n_files,
 
   return rval;
 }
-
-/*
-int main(int argc, char** argv) {
-*/
