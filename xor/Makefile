@@ -11,4 +11,9 @@ test: cxor.h cxor.c test_cxor.c
 	gcc test_cxor.c -O3 ./cxor.so -o test
 	./test
 
+coverage: test
+	gcc cxor.c test_cxor.c -O3 -o test -fprofile-arcs -ftest-coverage -pg
+	./test
+	gcov cxor.c
+
 all: bindings cxor.so
