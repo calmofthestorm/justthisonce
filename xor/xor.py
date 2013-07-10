@@ -1,4 +1,5 @@
-import ctypes, cxorlib
+import ctypes
+import cxorlib
 
 
 old = """

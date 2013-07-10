@@ -55,7 +55,7 @@ XorResult xor_worker(File_t inputs[], size_t n_inputs, File_t* output,
       return SUCCESS;
     }
 
-    remaining = output->cur_range;
+    remaining = output->range_left;
     for (i = 0; i < n_inputs; ++i) {
       while (inputs[i].range_left == 0 && ++inputs[i].cur_range) {
         inputs[i].range_left = inputs[i].ranges[inputs[i].cur_range].length;
@@ -104,6 +104,12 @@ XorResult xor_worker(File_t inputs[], size_t n_inputs, File_t* output,
       /* Keep track of progress */
       assert(len <= remaining);
       remaining -= len;
+      for (i = 0; i < n_inputs; ++i) {
+        assert(len <= inputs[i].range_left);
+        inputs[i].range_left -= len;
+      }
+      assert(len <= output->range_left);
+      output->range_left -= len;
     }
   }
 }
@@ -138,7 +144,7 @@ XorResult xor_files(File_t files[], const size_t n_files,
       return INFILE_ERROR;
     }
     for (j = 0; j < files[i].n_ranges; ++j) {
-      if (files[i].ranges[j].start >= stat_obj.st_size) {
+      if (stat_obj.st_size > 0 && files[i].ranges[j].start >= stat_obj.st_size) {
         return INVALID_RANGE;
       }
     }
