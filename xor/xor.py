@@ -1,37 +1,6 @@
 import ctypes
 import cxorlib
 
-
-old = """
-# TODO: see about auto-extracting the data structures/enums from shared source
-# TODO: consider moving to true Python bindings (but this complicates the build
-#       dramatically; may not be worth it for end users)
-
-class _Range(ctypes.Structure):
-  _fields = [("start", ctypes.c_size_t),
-             ("length", ctypes.c_size_t)]
-
-class _File(ctypes.Structure):
-  _fields_ = [("n_ranges", ctypes.c_size_t),
-              ("filepath", ctypes.c_char_p),
-              ("ranges", ctypes.c_void_p),
-              ("fd", ctypes.c_void_p),
-              ("size", ctypes.c_size_t)]
-              ("range_left", ctypes.c_size_t)]
-              ("cur_range", ctypes.c_size_t)]
-
-class _XorResult(object):
-  SUCCESS = 0
-  NO_WORK = 1
-  SIZE_MISMATCH = 2
-  OUTFILE_ERROR = 3
-  INFILE_ERROR = 4
-  MALLOC_FAILED = 5
-  INVALID_RANGE = 6
-  INFILE_SEEK_ERROR = -1
-  OUTFILE_SEEK_ERROR = -2
-"""
-
 _xorlib=ctypes.cdll.LoadLibrary("./cxor.so")
 
 def xorFiles(files, outfile):
