@@ -175,16 +175,11 @@ class Allocation(object):
 
   @classmethod
   def fromSerializationState(klass, state):
-    """Helper for the serialization code. This is a
-       compromise between dumping internal logic code into message.py and dumping
-       [potentially] legacy parsing code into pad.
-
-       This provides an abstraction between the on-disk format and the internal
-       representation. This format is a sequence of (filename, atoms) pairs
-       where atoms is (start, length) pairs."""
-    me = klass()
+    """See Allocation.toSerializationState"""
+    self = klass()
     for (filename, atoms) in state:
-      pass
+      self.unionUpdate(Allocation(filename, Interval.fromAtoms(atoms)))
+    return self 
 
   def __eq__(self, other):
     # Order matters!
