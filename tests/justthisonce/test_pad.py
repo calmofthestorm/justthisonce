@@ -104,7 +104,7 @@ class test_Allocation(unittest.TestCase):
   def _make_test_allocation(self, filesize, istart, ilen, padfile=None):
     if padfile is None:
       padfile = File("myfile%i" % self._uuid(), filesize, "current")
-    a = Allocation(padfile, istart, ilen)
+    a = Allocation(padfile, Interval.fromAtom(istart, ilen))
     return a, list(a.iterFiles()), padfile
 
   def _assert_equal_no_order(self, a, b):
@@ -140,17 +140,16 @@ class test_Allocation(unittest.TestCase):
 
     # Enforce ctor form.
     padfile = File("myfile", 50, "current")
-    for args in [(padfile, 40, None), (padfile, None, 5), (None, 40, 5), \
-                 (padfile, None, None), (None, 40, None), (None, None, 5)]:
-      self.assertRaises(AssertionError, Allocation, *args)
+    self.assertRaises(AssertionError, Allocation, None, Interval.fromAtom(3, 4))
+    self.assertRaises(AssertionError, Allocation, padfile, None)
 
   def test_unionUpdate(self):
     """Test allocation unionUpdate."""
     a, a_files, a_padfile = self._make_test_allocation(30, 10, 20)
     b, b_files, b_padfile = self._make_test_allocation(250, 15, 35)
     padfile = File("myfile%i" % self._uuid(), 10, "current")
-    a.unionUpdate(Allocation(padfile, 5, 5))
-    b.unionUpdate(Allocation(padfile, 0, 4))
+    a.unionUpdate(Allocation(padfile, Interval.fromAtom(5, 5)))
+    b.unionUpdate(Allocation(padfile, Interval.fromAtom(0, 4)))
     a_b = Allocation()
     a_b.unionUpdate(a)
     a_b.unionUpdate(b)
@@ -219,8 +218,8 @@ class test_Allocation(unittest.TestCase):
     a, a_files, a_padfile = self._make_test_allocation(30, 10, 20)
     b, b_files, b_padfile = self._make_test_allocation(250, 15, 35)
     padfile = File("myfile%i" % self._uuid(), 10, "current")
-    a = a.union(Allocation(padfile, 5, 5))
-    b = b.union(Allocation(padfile, 0, 4))
+    a = a.union(Allocation(padfile, Interval.fromAtom(5, 5)))
+    b = b.union(Allocation(padfile, Interval.fromAtom(0, 4)))
     self.assertNotEqual(a, b)
     a, b = self._symmetric_union(a, b)
     self._assert_equal_no_order(a, b)

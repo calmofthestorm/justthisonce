@@ -72,7 +72,8 @@ class File(object):
 
     alloc = Allocation()
     for (start, length) in self._extents.iterExterior(self.size):
-      seg = Allocation(self, start, min(requested - len(alloc), length))
+      interval = Interval.fromAtom(start, min(requested - len(alloc), length))
+      seg = Allocation(self, interval)
       alloc.unionUpdate(seg)
       if len(alloc) >= requested:
         assert len(alloc) == requested
@@ -98,20 +99,20 @@ class Allocation(object):
      multiple files. They may be constructed with union-like updates."""
   __metaclass__ = invariant.EnforceInvariant
 
-  def __init__(self, padfile=None, start=None, length=None):
-    """With no arguments, creates an empty allocation. With three, creates an
-       allocation with a single interval (which must not be empty.)"""
+  def __init__(self, padfile=None, interval=None):
+    """With no arguments, creates an empty allocation. With two, creates an
+       allocation in the given file with the given interval (which must be
+       non-empty)."""
 
     # Mapping from filename to (interval, padfile)
     self._alloc = collections.OrderedDict()
     self._size = 0
 
-    if padfile is None or start is None or length is None:
-      assert padfile is None and start is None and length is None
+    if padfile is None or interval is None:
+      assert padfile is None and interval is None
     else:
-      self._alloc[padfile.filename] = (Interval.fromAtom(start, length), \
-                                       padfile)
-      self._size = length
+      self._alloc[padfile.filename] = (interval, padfile)
+      self._size = len(interval)
 
   def _checkInvariant(self):
     # Size of an allocation must be the sum of the lengths of its' intervals.
@@ -160,8 +161,8 @@ class Allocation(object):
     """Returns an iterator of (interval, file)."""
     return self._alloc.itervalues()
 
-  def get_serialization_state(self):
-    """Helper for the serialization code. Only it should call this. This is a
+  def toSerializationState(self):
+    """Helper for the serialization code. This is a
        compromise between dumping internal logic code into message.py and dumping
        [potentially] legacy parsing code into pad.
 
@@ -171,6 +172,19 @@ class Allocation(object):
     return (((filename, interval.toAtoms())
              for (filename, (interval, padfile))
              in self._alloc.iteritems()))
+
+  @classmethod
+  def fromSerializationState(klass, state):
+    """Helper for the serialization code. This is a
+       compromise between dumping internal logic code into message.py and dumping
+       [potentially] legacy parsing code into pad.
+
+       This provides an abstraction between the on-disk format and the internal
+       representation. This format is a sequence of (filename, atoms) pairs
+       where atoms is (start, length) pairs."""
+    me = klass()
+    for (filename, atoms) in state:
+      pass
 
   def __eq__(self, other):
     # Order matters!
