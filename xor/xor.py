@@ -3,7 +3,40 @@ import cxorlib
 
 _xorlib=ctypes.cdll.LoadLibrary("./cxor.so")
 
-def xorFiles(files, outfile):
+class Error(Exception):
+  pass
+
+class AllocationSizeMismatch(Error):
+  pass
+
+def xorAllocation(alloc, infile, outfile):
+  """Given an allocation and an input file, xor the allocation with the input
+     file and *append* the result to the specified output file. All files
+     must be seekable."""
+  # Check the allocation is the correct length.
+  infile_size = os.stat(infile).st_size
+  if infile_size != len(alloc):
+    raise AllocationSizeMismatch(os.stat(infile), len(alloc))
+
+  # Encrypt the allocation one interval at a time.
+  infile_offset = 0
+  if os.path.exists(outfile):
+    outfile_offset = os.stat(outfile).st_size
+  else:
+    outfile_offset = 0
+  for (pad_interval, pad_file) in alloc.iterValues():
+    # Create intervals for the input and output files, which are just being
+    # processed sequentially.
+    infile_interval = Interval.fromAtom(infile_offset, len(pad_interval))
+    outfile_interval = Interval.fromAtom(outfile_offset, len(pad_interval))
+    infile_offset += len(pad_interval)
+    outfile_offset += len(pad_interval)
+
+    # Process this interval
+    _xorFiles([(infile, infile_interval), (pad_file, pad_interval)],
+              (outfile, outfile_interval))
+
+def _xorFiles(files, outfile):
   """Given files (a sequence of pairs of (filename, interval)), xor the
      specified ranges together and write it to outfile, itself a pair of
      (filename, interval)."""
@@ -28,4 +61,6 @@ def xorFiles(files, outfile):
     c_files[i] = makeFile_t(infile)
   
   c_outfile = makeFile_t(outfile)
-  return _xorlib.xor_files(c_files, len(files), ctypes.pointer(c_outfile))
+  res = _xorlib.xor_files(c_files, len(files), ctypes.pointer(c_outfile))
+  if res:
+    raise CXORError(res)

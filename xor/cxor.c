@@ -159,7 +159,7 @@ XorResult xor_files(File_t files[], const size_t n_files,
   }
 
   /* Create outfile */
-  outfile->fd = fopen(outfile->filepath, "wb");
+  outfile->fd = fopen(outfile->filepath, "a");
   if (!outfile->fd) {
     return OUTFILE_ERROR;
   }
