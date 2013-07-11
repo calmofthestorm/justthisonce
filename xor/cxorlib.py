@@ -6,39 +6,16 @@ STRING = c_char_p
 __codecvt_noconv = 3
 __codecvt_error = 2
 __codecvt_partial = 1
-SUCCESS = 0
-INFILE_SEEK_ERROR = -1
-MALLOC_FAILED = 5
-SIZE_MISMATCH = 2
-NO_WORK = 1
 __codecvt_ok = 0
-OUTFILE_SEEK_ERROR = -2
-INVALID_RANGE = 6
-INFILE_ERROR = 4
-OUTFILE_ERROR = 3
-
-# values for enumeration 'XorResult'
-XorResult = c_int # enum
-class Range_t(Structure):
-    pass
-size_t = c_ulong
-Range_t._fields_ = [
-    ('start', size_t),
-    ('length', size_t),
-]
-class File_t(Structure):
+class XorWorkUnit(Structure):
     pass
 class _IO_FILE(Structure):
     pass
 FILE = _IO_FILE
-File_t._fields_ = [
-    ('n_ranges', size_t),
-    ('filepath', c_char * 4096),
-    ('ranges', POINTER(Range_t)),
-    ('fd', POINTER(FILE)),
-    ('size', size_t),
-    ('range_left', size_t),
-    ('cur_range', size_t),
+XorWorkUnit._fields_ = [
+    ('output', POINTER(FILE)),
+    ('inputs', POINTER(FILE) * 2),
+    ('buf', c_char * 4194304 * 2),
 ]
 class _G_fpos_t(Structure):
     pass
@@ -81,6 +58,7 @@ _IO_marker._fields_ = [
 
 # values for enumeration '__codecvt_result'
 __codecvt_result = c_int # enum
+size_t = c_ulong
 _IO_FILE._fields_ = [
     ('_flags', c_int),
     ('_IO_read_ptr', STRING),
@@ -465,54 +443,50 @@ locale_t = __locale_t
 ptrdiff_t = c_long
 __all__ = ['__uint16_t', '__pthread_mutex_s',
            'N16pthread_rwlock_t4DOT_14E', '__int16_t',
-           'INVALID_RANGE', 'pthread_condattr_t', 'pthread_once_t',
-           'fsfilcnt_t', '__timer_t', 'FILE', '__off64_t', 'size_t',
+           'pthread_condattr_t', 'pthread_once_t', 'fsfilcnt_t',
+           '__timer_t', 'FILE', 'pthread_mutexattr_t', 'size_t',
            'N14pthread_cond_t4DOT_11E', 'random_data', '__uint32_t',
-           'fpos_t', 'File_t', 'blkcnt_t', '__syscall_slong_t',
+           'fpos_t', 'fd_set', 'blkcnt_t', '__codecvt_partial',
            '__ino64_t', 'fsblkcnt64_t', '__qaddr_t', '__mode_t',
            '__loff_t', '__FILE', 'daddr_t', '__locale_data',
            'cookie_seek_function_t', 'N4wait3DOT_2E', 'fpos64_t',
-           'XorResult', 'uid_t', 'cookie_write_function_t',
-           'u_int64_t', 'u_int16_t', '__time_t', 'sigset_t',
-           '_G_fpos64_t', 'blksize_t', 'va_list', '_IO_jump_t',
-           '__int32_t', 'pthread_rwlock_t', '__nlink_t',
-           '__compar_fn_t', 'pthread_spinlock_t',
+           'uid_t', 'cookie_write_function_t', 'u_int64_t',
+           'u_int16_t', '__time_t', 'sigset_t', '_G_fpos64_t',
+           '_G_fpos_t', '_IO_jump_t', '__int32_t', 'pthread_rwlock_t',
+           '__nlink_t', '__compar_fn_t', '__fsid_t',
            'cookie_close_function_t', '__uint64_t', 'mode_t',
-           '__ssize_t', '__io_close_fn', '__va_list_tag',
-           'pthread_mutexattr_t', '__fsword_t', '__fd_mask',
-           'int16_t', '__codecvt_ok', 'clock_t', '__id_t',
-           'cookie_io_functions_t', '__sigset_t', '__clockid_t',
-           '__useconds_t', 'INFILE_SEEK_ERROR', 'div_t', 'id_t',
-           'ldiv_t', '__codecvt_partial', 'pthread_barrier_t',
-           '__gid_t', 'u_int32_t', 'fd_mask',
+           '__ssize_t', '__io_close_fn', '__va_list_tag', '__off64_t',
+           '__fsword_t', '__fd_mask', 'int16_t', '__codecvt_ok',
+           'clock_t', '__id_t', 'cookie_io_functions_t', '__sigset_t',
+           '__clockid_t', '__useconds_t', 'div_t', 'id_t', 'ldiv_t',
+           'va_list', 'pthread_barrier_t', 'u_int32_t', 'fd_mask',
            '__pthread_internal_list', '_IO_cookie_io_functions_t',
-           '__codecvt_result', '__gnuc_va_list', 'INFILE_ERROR',
-           '__intptr_t', '__u_long', 'wait', '_IO_FILE_plus',
+           '__codecvt_result', '__gnuc_va_list', '__intptr_t',
+           '__u_long', 'wait', 'XorWorkUnit', '_IO_FILE_plus',
            'ushort', '__blkcnt_t', '__pthread_list_t', 'clockid_t',
-           'pthread_attr_t', 'fd_set', 'caddr_t', 'uint',
-           '__rlim64_t', 'ino_t', 'Range_t', 'int32_t', 'off64_t',
-           '__blksize_t', '__syscall_ulong_t', 'MALLOC_FAILED',
-           '__off_t', 'fsblkcnt_t', 'OUTFILE_ERROR', 'u_quad_t',
-           'timespec', 'register_t', '__compar_d_fn_t', 'obstack',
-           'fsfilcnt64_t', '__locale_struct', 'comparison_fn_t',
-           '__daddr_t', 'ino64_t', '_IO_cookie_file',
-           '__sig_atomic_t', '__mbstate_t', 'SUCCESS', '__io_seek_fn',
-           '__u_char', '__fsblkcnt64_t', 'u_int', '__caddr_t',
-           'u_int8_t', '__blkcnt64_t', '__dev_t', 'gid_t',
-           'pthread_barrierattr_t', 'OUTFILE_SEEK_ERROR',
-           '__suseconds_t', 'pid_t', 'timer_t', 'quad_t', 'u_long',
-           'SIZE_MISMATCH', '__fsfilcnt64_t', '_IO_FILE',
-           'cookie_read_function_t', 'pthread_key_t', 'blkcnt64_t',
-           '__io_read_fn', 'loff_t', 'pthread_cond_t', 'off_t',
-           '__fsblkcnt_t', 'int64_t', 'NO_WORK', '__rlim_t',
+           'pthread_attr_t', 'ptrdiff_t', 'caddr_t', 'uint',
+           '__rlim64_t', 'ino_t', 'u_int8_t', 'int32_t', 'off64_t',
+           '__blksize_t', '__syscall_ulong_t', 'pthread_spinlock_t',
+           '__off_t', 'fsblkcnt_t', '__gid_t', 'u_quad_t', 'timespec',
+           'register_t', '__syscall_slong_t', '__compar_d_fn_t',
+           'obstack', 'fsfilcnt64_t', '__locale_struct',
+           'comparison_fn_t', '__daddr_t', 'ino64_t',
+           '_IO_cookie_file', '__sig_atomic_t', '__mbstate_t',
+           '__uint8_t', '__io_seek_fn', '__u_char', '__fsblkcnt64_t',
+           'u_int', '__caddr_t', '__blkcnt64_t', '__dev_t', 'gid_t',
+           'pthread_barrierattr_t', '__suseconds_t', 'pid_t',
+           'timer_t', 'quad_t', 'u_long', '__fsfilcnt64_t',
+           '_IO_FILE', 'cookie_read_function_t', 'pthread_key_t',
+           'blkcnt64_t', '__io_read_fn', 'loff_t', 'pthread_cond_t',
+           'off_t', 'int64_t', '__fsblkcnt_t', '__rlim_t',
            'N4wait3DOT_1E', 'time_t', 'pthread_t', '__locale_t',
-           'drand48_data', '__uint8_t', 'lldiv_t', '__fsid_t',
-           '__quad_t', 'timeval', '__codecvt_error', '_IO_marker',
-           '__u_quad_t', '__u_short', '__int8_t', 'fsid_t', '__pid_t',
-           'ssize_t', 'ulong', 'u_short', 'N11__mbstate_t4DOT_19E',
-           'ptrdiff_t', '__io_write_fn', 'key_t', '__ino_t', 'int8_t',
+           'drand48_data', 'blksize_t', 'lldiv_t', '__quad_t',
+           'timeval', '__codecvt_error', '_IO_marker', '__u_quad_t',
+           '__u_short', '__int8_t', 'fsid_t', '__pid_t', 'ssize_t',
+           'ulong', 'u_short', 'N11__mbstate_t4DOT_19E',
+           '__io_write_fn', 'key_t', '__ino_t', 'int8_t',
            'useconds_t', '_IO_lock_t', 'nlink_t',
            'pthread_rwlockattr_t', 'locale_t', '__socklen_t',
-           'u_char', '__u_int', '_G_fpos_t', 'pthread_mutex_t',
-           '__int64_t', '__key_t', '__codecvt_noconv', '__clock_t',
-           'dev_t', '__uid_t', '__fsfilcnt_t', 'suseconds_t']
+           'u_char', '__u_int', 'pthread_mutex_t', '__int64_t',
+           '__key_t', '__codecvt_noconv', '__clock_t', 'dev_t',
+           '__uid_t', '__fsfilcnt_t', 'suseconds_t']
