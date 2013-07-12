@@ -386,8 +386,7 @@ class Pad(object):
     # flush/close raises an exception.
     #TODO write recovery code and inttest it
     self._fs.rename("metadata.pck", "metadata.bkp")
-    self._fs.rename("VERSION", "metadata.bkp")
-    cPickle.dump(self.metadata, open("metadata.pck", 'w'), -1)
+    cPickle.dump(self.metadata, self._fs.open("metadata.pck", 'w'), -1)
     self._fs.open("VERSION", 'w').write("%s\n%s" % (COMPAT, VERSION))
 
   def getAllocation(self, requested):
