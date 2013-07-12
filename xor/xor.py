@@ -1,7 +1,8 @@
 import ctypes
 import cxorlib
 
-_xorlib=ctypes.cdll.LoadLibrary("./cxor.so")
+# TODO: this needs to be relative to application dir.
+_xorlib=ctypes.cdll.LoadLibrary("/home/alexr/projects/justthisonce/xor/cxor.so")
 
 class Error(Exception):
   pass
@@ -11,6 +12,10 @@ class AllocationSizeMismatch(Error):
 
 class CXORError(Error):
   pass
+
+def execute(fxn, *args):
+  if fxn(*args) != 0:
+    raise CXORError()
 
 def xorAllocation(alloc, infile, outfile):
   """Given an allocation and an input file, xor the allocation with the input
@@ -27,15 +32,15 @@ def xorAllocation(alloc, infile, outfile):
   work.inputs[1] = None
 
   try:
-    assert(!cxor.execute_open_input(work, 1, infile))
-    assert(!cxor.execute_open_output(work, outfile))
+    execute(cxor.execute_open_input, work, 1, infile)
+    execute(cxor.execute_open_output, work, outfile)
 
     # Encrypt the allocation one interval at a time.
     for (pad_interval, pad_file) in alloc.iterValues():
-      assert(!cxor.execute_open_input(work, 0, pad_file))
+      execute(cxor.execute_open_input, work, 0, pad_file)
       for (start, length) in pad_interval.toAtoms():
-        assert(!cxor.execute_seek_input(work, 0, start))
-        assert(!cxor.execute_xor(work, length))
-    assert(!cxor.execute_cleanup(work))
+        execute(cxor.execute_seek_input, work, 0, start)
+        execute(cxor.execute_xor, work, length)
+    execute(cxor.execute_cleanup, work)
   except AssertionError:
     raise CXORError()
