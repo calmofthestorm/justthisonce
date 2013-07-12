@@ -457,3 +457,12 @@ class Pad(object):
   @property
   def uncommitted(self):
     return self._uncommitted
+
+def createPad(path):
+  """Creates a new empty pad at the specified path."""
+  Pad.createPad(Filesystem(path))
+  return loadPad(path)
+
+def loadPad(path):
+  """Loads an existing pad at the given path."""
+  return Pad(Filesystem(path))
