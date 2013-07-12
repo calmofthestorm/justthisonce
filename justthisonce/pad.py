@@ -351,7 +351,7 @@ class Pad(object):
     """Opens a pad. If create is True, will initialize
        the pad if it does not exist."""
     self._fs = fs
-    self._uncomitted = 0
+    self._uncommitted = 0
     if not self._fs.exists("."):
       raise InvalidPad("No such file or directory.")
     
@@ -374,7 +374,7 @@ class Pad(object):
     self.flush()
 
   def _checkInvariant(self):
-    assert self._uncomitted in (0, 1)
+    assert self._uncommitted in (0, 1)
 
   def flush(self):
     """Flush the pad's current state to disk but do not close it. This will
@@ -426,17 +426,17 @@ class Pad(object):
       allocation.unionUpdate(newb)
 
     assert len(allocation) == requested
-    self._uncomitted += 1
+    self._uncommitted += 1
     return allocation
 
   def discardUncommitted(self):
     """Releases any outstanding allocations."""
-    self._uncomitted = 0
+    self._uncommitted = 0
   
   def commitAllocation(self, alloc):
     """Commits the use of an allocation, and writes the updated metadata
        and any file moves to disk."""
-    assert self._uncomitted == 1
+    assert self._uncommitted == 1
     self.discardUncommitted()
 
     # Move any files in incoming
@@ -456,4 +456,4 @@ class Pad(object):
 
   @property
   def uncommitted(self):
-    return self._uncomitted
+    return self._uncommitted
