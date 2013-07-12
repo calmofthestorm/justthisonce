@@ -1,7 +1,5 @@
 """
-Code for processing messages themselves (as well as notifications etc). All
-[de] serialization is handled here, rather than in the classes they operate on,
-because I don't want to mix parsing with the actual program logic.
+Code for processing messages themselves (as well as notifications etc).
 """
 
 import json

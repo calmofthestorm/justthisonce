@@ -1,3 +1,9 @@
+* xorlib needs to handle EOFError in C when doing stdin crypto.
+* need to handel allocation size > input size (for stdin)
+* allocations need well-defined ordering and union issues wrt padfiles
+* close opened files
+* names in all files
+* Tidy up exception hierarchy
 * test pad (except fsck)
 * Consider abstracting the filesystem for pad for DRY and mockability
 * test pad fsck and error recovery in presence of interruption and generally nail down fault tolerance
