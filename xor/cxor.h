@@ -2,8 +2,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-/* Read and write in multiples of this amount. C90 forbids the use of variables
- * (even consts) as lengths lengths for stack-allocated arrays. */
 #define BUFFER_LENGTH 4 * 1024 * 1024
 
 typedef struct XorWorkUnit {

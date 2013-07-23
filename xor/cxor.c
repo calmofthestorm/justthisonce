@@ -70,7 +70,7 @@ int execute_seek_input(XorWorkUnit* work, int index, size_t pos) {
 }
 
 int execute_xor(XorWorkUnit* work, size_t length) {
-  size_t size = length ? length < BUFFER_LENGTH : BUFFER_LENGTH;
+  size_t size = length < BUFFER_LENGTH ? length : BUFFER_LENGTH;
   if (!work->inputs[0] || !work->inputs[1] || !work->output ||
       fread(work->buf[0], 1, size, work->inputs[0]) != size ||
       fread(work->buf[1], 1, size, work->inputs[1]) != size) {
@@ -98,6 +98,8 @@ int execute_xor(XorWorkUnit* work, size_t length) {
 }
 
 int execute_cleanup(XorWorkUnit* work) {
-  return (close_file(work->inputs[0]) || close_file(work->inputs[1]) ||
-          close_file(work->output));
+  int success = (close_file(work->inputs[0]) || close_file(work->inputs[1]) ||
+                 close_file(work->output));
+  work->inputs[0] = work->inputs[1] = work->output = NULL;
+  return success;
 }
