@@ -38,7 +38,7 @@ class PyXOR(object):
       work.inputs[index].close()
     if filename:
       work.inputs[index] = open(filename, "rb")
-    else if work.inputs[0 if index == 1 else 1] != sys.stdin:
+    elif work.inputs[0 if index == 1 else 1] != sys.stdin:
       work.inputs[index] = sys.stdin
     else:
       execute_cleanup(work)
@@ -57,7 +57,7 @@ class PyXOR(object):
 
   @staticmethod
   def execute_seek_input(work, index, pos):
-    if !work.inputs[index] or work.inputs[index] == sys.stdin:
+    if not work.inputs[index] or work.inputs[index] == sys.stdin:
       execute_cleanup(work)
       return -1
     work.inputs[index].seek(ps, os.SEEK_SET)
