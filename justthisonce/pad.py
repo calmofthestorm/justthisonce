@@ -7,19 +7,39 @@ spent.
 import cPickle
 import os
 import collections
+import sqlite3
+import uuid as uuidlib
 
 from justthisonce.interval import Interval
 from justthisonce import invariant
 
-COMPAT = 0
-VERSION = 0
+_COMPAT = [0]
+_VERSION = 0
+
+_METADATA_PATH = "metadata.sqlite3"
+_PADDIR_PATHS = "pending", "current", "spent", "tmp"
 
 class Error(Exception):
   """Base error for the pad module."""
 
+class PathNotEmpty(Error):
+  """The specified path is either a file or a non-empty directory."""
+
 class InvalidPad(Error):
   """The on-disk pad structure has broken invariants, is corrupt, etc, and
      there is no obvious way to repair it."""
+
+class PadNotFound(Error):
+  """There is no file or directory at the specified path."""
+
+class MissingPadfile(Error):
+  """Padfile is either missing or a directory."""
+
+class MultiplePadfileLinks(Error):
+  """Specified padfile has additional hardlinks."""
+
+class UnknownPadVersion(Error):
+  """The on-disk pad is in an odd state but we can probably fix it safely."""
 
 class PadDirty(Error):
   """The on-disk pad is in an odd state but we can probably fix it safely."""
@@ -256,213 +276,112 @@ class Pad(object):
   """Represents an on-disk pad dir."""
   __metaclass__ = invariant.EnforceInvariant
 
-  @classmethod
-  def createPad(cls, fs):
-    """Creates a new pad on the provided fs. Will not clobber an
-       existing non-empty directory."""
-    if fs.exists("."):
-      if fs.listdir("."):
-        raise InvalidPad("Directory exists and is not empty.")
-    else:
-      fs.mkdir(".")
+  def __init__(self, db, paddir):
+    self._db = db
+    self._paddir = paddir
 
-    for subdir in "incoming", "current", "spent":
-      fs.mkdir(subdir)
-    cPickle.dump(Metadata(), fs.open("metadata.pck", 'w'), -1)
-    fs.open("VERSION", 'w').write("%s\n%s" % (COMPAT, VERSION))
+  def addPadfile(self, padfile, uuid=None, ignore_links=False):
+    """Adds the specified padfile to the paddir. It will be moved there,
+       possibly across devices, and add the necessare metadata. If
+       ignore_links is False and the file has more than one hard link,
+       raise MultiplePadfileLinks exception."""
+    if not os.path.exists(padfile) or not os.path.isfile(padfile):
+      raise MissingPadfile(padfile)
 
-  def _loadMetadata(self):
-    """Helper for init. Loads the metadata from the filesystem. Raises
-       InvalidPad if the metadata is bad or from an unsupperted version."""
-    # Try to load the metadata
-    try:
-      self.metadata = cPickle.load(self._fs.open("metadata.pck"))
-    except:
-      raise InvalidPad("Metadata missing or corrupt")
+    stat_info = os.stat(padfile)
+    if not ignore_links and stat_info.st_nlink != 1:
+      raise MultiplePadfileLinks(padfile)
 
-    # Check the version and compatability
-    try:
-      self.metadata.compatability, self.metadata.version = \
-          map(int, self._fs.open("VERSION").read().split("\n"))
-    except:
-      raise InvalidPad("Version missing or corrupt")
+    basename = os.path.split(padfile)[1]
+    if (os.path.exists(os.path.join(self._paddir, basename)) or
+        self._db.execute("select count(id) from files where name=?;",
+                         (basename,)).fetchone()[0] != 0:
+      raise DuplicatePadfileName(basename)
 
-    # Make sure the pad is compatable
-    if self.metadata.compatability > COMPAT:
-      raise InvalidPad("Pad is protocol %i but I only understand up to %i" % \
-                       (self.metadata.compatability, COMPAT))
+    check_uuid_query = "select count(id) from files where uuid=?;"
 
-  def _verifyDirStructure(self):
-    """Helper for init. Verifies the structure in the paddir is valid."""
-    fn = []
-    for subdir in "incoming", "current", "spent":
-      if not self._fs.exists(subdir):
-        raise InvalidPad("Directory structure bad")
-      fn.extend(self._fs.listdir(subdir))
-    if len(fn) != len(set(fn)):
-      raise InvalidPad("Duplicate pad filenames detected. " \
-                       "Filenames must be unique.")
+    # If the user specifies an invalid uuid, we bail.
+    if (uuid is not None and
+        self._db.execute(check_uuid_query, (uuid,)).fetchone() != (0,)):
+      raise DuplicateUUID(uuid)
 
-  def _findMissingPads(self):
-    """Helper for init. Looks for missing pads and sets readonly on the
-       fs if any are found."""
-    for i in reversed(range(len(self.metadata.current))):
-      entry = self.metadata.current[i]
-      assert entry.subdir == "current"
-      if not self._fs.exists((entry.subdir, entry.filename)):
-        if entry.used == 0:
-          # Unused pad missing from current.
-          self._fs.setReadonly()
-          del self.metadata.current[i]
-        elif self._fs.exists(("incoming", entry.filename)):
-          # Padfile found in incoming but expected in current.
-          self._fs.setReadonly()
-          entry.subdir = "incoming"
-        elif self._fs.exists(("spent", entry.filename)):
-          # Pad found in spent but was not marked as used up in metadata.
-          self._fs.setReadonly()
-          entry.subdir = "spent"
-          entry.consumeEntireFile()
-        elif entry.used == entry.size:
-          # Fully used pad missing from current.
-          self._fs.setReadonly()
-          del self.metadata.current[i]
-        else:
-          # Missing non-unused/full padfile.
-          self._fs.setReadonly()
-          del self.metadata.current[i]
+    # Generate a unique uuid for the file.
+    if uuid is None:
+      uuid = uuidlib.uuid4()
+      while self._db.execute(check_uuid_query, (uuid,)).fetchone() != (0,)):
+        uuid = uuidlib.uuid4()
 
-  def _verifyPadfileSize(self):
-    """Helper for init. Verifies all pad sizes."""
-    for i in reversed(range(len(self.metadata.current))):
-      entry = self.metadata.current[i]
-      actual = self._fs.stat(("current", entry.filename)).st_size
-      if entry.size != actual:
-        # Current pad file changed size
-        self._fs.set_readonly()
+    # Move the padfile into the paddir. We use a tempname in case this is an
+    # inter-device move, in which case it may be slow. We are not concerned with
+    # malicious race conditions -- if an adversary can write to your paddir it's
+    # already game over. The temp name is to prevent *accidental* overwrites.
+    tmpname = os.path.join(self._paddir, "tmp", uuidlib.uuid4())
+    while os.path.exists(tmpname):
+      tmpname = os.path.join(self._paddir, "tmp", uuidlib.uuid4())
+    os.rename(padfile, tmpname)
 
-        # Can't trust it anymore. Mark it as spent but don't delete so can at
-        # least try to decrypt.
-        entry.consumeEntireFile()
-        entry.size = actual
-        entry.spent = min(actual, entry.spent)
+    # TODO: windows + old python will break this; figure out what to do.
+    os.link(tmpname, destname)
+    os.unlink(tmpname)
 
-  def __init__(self, fs, fsck=False):
-    """Opens a pad. If create is True, will initialize
-       the pad if it does not exist."""
-    self._fs = fs
-    self._uncommitted = 0
-    if not self._fs.exists("."):
-      raise InvalidPad("No such file or directory.")
-    
-    # Try to load the metadata
-    self._loadMetadata()
-
-    # Verify directory structure and check for duplicate filenames.
-    self._verifyDirStructure()
-
-    # Check for pads that are in metadata but not on-disk. If they
-    # have any used space, their absence is an error but if not, they may
-    # be stragglers left over from an interrupted "claiming" of a new
-    # pad file, and we can savely remove their metadata.
-    self._findMissingPads()
-
-    # Verify the size of all pads that are in use
-    self._verifyPadfileSize() 
-
-    # Flush metadata
-    self.flush()
+    # If the file copied correctly, add it to the database. To prevent potential
+    # key material loss, we don't attempt to clean up once the move has started if
+    # something should go wrong.
+    self._db.execute("insert into files (name, uuid, size, dir, id) values (?,?,?,?,?);",
+                     (basename, uuid, stat_info.st_size, "pending", None))
+    self._db.commit()
 
   def _checkInvariant(self):
-    assert self._uncommitted in (0, 1)
-
-  def flush(self):
-    """Flush the pad's current state to disk but do not close it. This will
-       not discard uncommitted transactions, but they will not be saved to
-       disk. This is intentional -- If we crash before a txn is explicitly
-       committed, it should be rolled back."""
-    # Save old as a backup in case the dump fails. Routines that move the
-    # actual files around should be able to tolerate reverting to these if
-    # flush/close raises an exception.
-    #TODO write recovery code and inttest it
-    self._fs.rename("metadata.pck", "metadata.bkp")
-    cPickle.dump(self.metadata, self._fs.open("metadata.pck", 'w'), -1)
-    self._fs.open("VERSION", 'w').write("%s\n%s" % (COMPAT, VERSION))
-
-  def getAllocation(self, requested):
-    """Requests the pad to allocate requested bytes of pad. Returns an
-       Allocation or raises OutOfPad if there is no pad left. This should
-       not modify the state of the pad in any way except to mark that there
-       is an uncommitted allocation pending. This is done to force serialization
-       of pad claiming to prevent accidental reuse of the same key material."""
-    # Look through the files we are already using first.
-    current_free = sum((pad.free for pad in self.metadata.current))
-
-    if current_free < requested:
-      # We need more pad. Look through incoming to see if we can service the
-      # request, beginning with the smallest files.
-      can_get = 0
-      new_pads = [(fn, self._fs.stat(("incoming", fn)).st_size) \
-                  for fn in os.listdir("incoming")]
-      new_pads.sort(lambda (pad, size): size)
-      last_need = -1
-      for last_need, (pad, size) in enumerate(new_pads):
-        can_get += size
-        if can_get + current_free >= requested:
-          break
-      else:
-        raise OutOfPad("Can't allocate %i bytes; %i bytes available" \
-                       % (requested, can_get))
-
-
-    new_files = [File(pad, size, "incoming") \
-                 for (pad, size) in new_pads[:last_need + 1]]
-
-    # There is now enough space to actually allocate in current.
-    needed = requested
-    allocation = Allocation()
-    for pad in self.metadata.current + new_files:
-      newb = pad.getAllocation(min(needed - len(allocation), pad.free))
-      allocation.unionUpdate(newb)
-
-    assert len(allocation) == requested
-    self._uncommitted += 1
-    return allocation
-
-  def discardUncommitted(self):
-    """Releases any outstanding allocations."""
-    self._uncommitted = 0
-  
-  def commitAllocation(self, alloc):
-    """Commits the use of an allocation, and writes the updated metadata
-       and any file moves to disk."""
-    assert self._uncommitted == 1
-    self.discardUncommitted()
-
-    # Move any files in incoming
-    for (ival, padfile) in alloc.iterFiles():
-      if padfile not in self.metadata.current:
-        assert padfile.subdir == "incoming"
-        os.rename(padfile.path, ("current", padfile.filename))
-        padfile.subdir = "current"
-
-      # Mark used extents as used in file, and move to spent if necessary
-      padfile.markIntervalAsUsed(ival)
-      if padfile.free == 0:
-        os.rename(padfile.path, ("spent", padfile.filename))
-      
-    # Write out the metadata
-    self.flush()
-
-  @property
-  def uncommitted(self):
-    return self._uncommitted
+    pass
 
 def createPad(path):
   """Creates a new empty pad at the specified path."""
-  Pad.createPad(Filesystem(path))
-  return loadPad(path)
+  if os.path.exists(path):
+    if not os.path.isdir(path) or os.listdir(path):
+      raise PathNotEmpty()
+  else:
+    os.mkdir(path)
+
+  dbpath = os.path.join(path, _METADATA_PATH)
+  try:
+    db = sqlite3.connect(dbpath)
+    db.execute("pragma foreign_keys = ON;")
+    db.execute("""create table files (
+        name string not null unique,
+        uuid string not null unique,
+        size integer not null check(size >= 0),
+        dir string check(dir in ('pending', 'current', 'spent')) not null,
+        id integer not null unique primary key autoincrement);""")
+    db.execute("""create table allocations (
+        file integer not null references files(id),
+        start integer not null check(start >= 0),
+        length integer not null check(start >= 0));""")
+    db.execute("pragma user_version=%i;" % _VERSION) # ? not ok with pragma.
+    db.commit()
+  except Exception:
+    os.unlink(dbpath)
+    raise
+
+  for seg in _PADDIR_PATHS:
+    os.mkdir(os.path.join(path, seg))
 
 def loadPad(path):
   """Loads an existing pad at the given path."""
-  return Pad(Filesystem(path))
+  if not os.path.exists(path):
+    raise PadNotFound(path)
+  if not os.path.isdir(path):
+    raise InvalidPad("%s is not a directory." % path)
+  for name in _PADDIR_PATHS:
+    seg = os.path.join(path, name)
+    if not os.path.exists(seg) or not os.path.isdir(seg):
+      raise InvalidPad("Missing %s" % seg)
+  dbfile = os.path.join(path, _METADATA_PATH)
+  if not os.path.exists(dbfile) or not os.path.isfile(dbfile):
+    raise InvalidPad("Missing %s" % dbfile)
+
+  db = sqlite3.connect(dbfile)
+  version = db.execute("pragma user_version;").fetchone()[0]
+  if version not in _COMPAT:
+    raise UnknownPadVersion("Pad version %i not supported. Supported: %s" % (version, _VERSION))
+
+  return Pad(db, path)
