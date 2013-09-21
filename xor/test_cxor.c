@@ -1,6 +1,10 @@
 /* Very simple unit tests for the C bindings. More thorough tests of edge cases
  * are tested from the Python tests. */
+
 #include <assert.h>
+#define __USE_BSD /* For mkdtemp. */
+
+
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
