@@ -60,7 +60,7 @@ int execute_open_output(XorWorkUnit* work, const char* filename) {
 }
 
 int execute_seek_input(XorWorkUnit* work, int index, size_t pos) {
-  if ((!work->inputs[index] || work->inputs[index] == stdin) || 
+  if ((!work->inputs[index] || work->inputs[index] == stdin) ||
       (fseek(work->inputs[index], pos, SEEK_SET))) {
     execute_cleanup(work);
     return -1;
