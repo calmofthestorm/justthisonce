@@ -7,7 +7,7 @@
 typedef struct XorWorkUnit {
   FILE* output;
   FILE* inputs[2];
-  char buf[2][BUFFER_LENGTH];
+  char buf[2][BUFFER_LENGTH] __attribute__((__aligned__(32)));
 } XorWorkUnit;
 
 int execute_xor(XorWorkUnit* work, size_t length);
