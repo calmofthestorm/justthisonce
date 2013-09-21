@@ -97,6 +97,7 @@ int execute_xor(XorWorkUnit* work, size_t length) {
       execute_cleanup(work);
       return -1;
     }
+  }
 
   return 0;
 }
