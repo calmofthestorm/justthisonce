@@ -53,7 +53,7 @@ int xor_test(char* inputs[2], size_t length) {
   }
 
   if (!rval) {
-    XorWorkUnit* work = malloc(sizeof(XorWorkUnit));
+    XorWorkUnit* work = malloc(sizeof(*work));
     if (work) {
       work->output = work->inputs[0] = work->inputs[1] = 0;
     } else {
