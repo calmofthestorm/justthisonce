@@ -12,7 +12,7 @@ test: cxor.h cxor.c test_cxor.c
 	./test
 
 coverage: test
-	gcc cxor.c test_cxor.c -O3 -o test -fprofile-arcs -ftest-coverage -pg --std=c99 -floop-optimize
+	gcc cxor.c test_cxor.c -o test -fprofile-arcs -ftest-coverage -pg --std=c99
 	./test
 	gcov cxor.c
 
