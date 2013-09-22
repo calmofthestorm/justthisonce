@@ -1,14 +1,14 @@
 default: all
 
 cxor.so: cxor.c cxor.h
-	$(CC) -fPIC -shared -Wall -Werror -O3 -o $@ -std=c99 -floop-optimize -g $< -march=native
+	$(CC) -fPIC -shared -Wall -Werror -O3 -o $@ -std=c99 -g $< -march=native
 
 bindings: cxor.so cxor.h
 	h2xml.py `pwd`/cxor.h -o cxor.xml
 	xml2py.py `pwd`/cxor.xml -o cxorlib.py
 
 test: cxor.so test_cxor.c
-	$(CC) test_cxor.c -O3 ./cxor.so -o $@ --std=c99 -floop-optimize -g
+	$(CC) test_cxor.c -O3 ./cxor.so -o $@ --std=c99 -g
 	./test
 
 coverage: test
