@@ -1,6 +1,10 @@
 /* Very simple unit tests for the C bindings. More thorough tests of edge cases
  * are tested from the Python tests. */
+
 #include <assert.h>
+#define __USE_BSD /* For mkdtemp. */
+
+
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -49,7 +53,7 @@ int xor_test(char* inputs[2], size_t length) {
   }
 
   if (!rval) {
-    XorWorkUnit* work = malloc(sizeof(XorWorkUnit));
+    XorWorkUnit* work = malloc(sizeof(*work));
     if (work) {
       work->output = work->inputs[0] = work->inputs[1] = 0;
     } else {

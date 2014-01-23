@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <immintrin.h>
 
 #include "cxor.h"
 
@@ -60,7 +61,7 @@ int execute_open_output(XorWorkUnit* work, const char* filename) {
 }
 
 int execute_seek_input(XorWorkUnit* work, int index, size_t pos) {
-  if ((!work->inputs[index] || work->inputs[index] == stdin) || 
+  if ((!work->inputs[index] || work->inputs[index] == stdin) ||
       (fseek(work->inputs[index], pos, SEEK_SET))) {
     execute_cleanup(work);
     return -1;
@@ -69,7 +70,125 @@ int execute_seek_input(XorWorkUnit* work, int index, size_t pos) {
   }
 }
 
+static void xor_c  (char *out, const char *pad, size_t size) {
+    typedef size_t chunk_t;
+
+    size_t i;
+    size_t integral_size = size & ~(sizeof(chunk_t) - 1u);
+    /* Do as much as possible with machine words. */
+    for (i = 0; i < integral_size; i += sizeof(chunk_t)) {
+        *(chunk_t *) (out + i) ^= *(const chunk_t *) (pad + i);
+    }
+
+    /* Finish off partial words. */
+    for (; i < size; i++) {
+        out[i] ^= pad[i];
+    }
+}
+
+#ifdef __SSE__
+static void xor_sse(char *out, const char *pad, size_t size) {
+    size_t i;
+    size_t integral_size = size & ~(15u);
+    for (i = 0; i < integral_size; i += 16u) {
+        /*
+         * Until we can guarantee that the buffers are properly (16-byte)
+         * aligned, we use the unaligned forms.
+         */
+        __m128 o = _mm_loadu_ps((const float *) (out + i));
+        __m128 p = _mm_loadu_ps((const float *) (pad + i));
+
+        _mm_storeu_ps((float *) (out + i), _mm_xor_ps(o, p));
+    }
+
+    /* Finish off partial words. */
+    for (; i < size; i++) {
+        out[i] ^= pad[i];
+    }
+}
+#endif
+
+#ifdef __AVX__
+static void xor_avx(char *out, const char *pad, size_t size) {
+    size_t i;
+    size_t integral_size = size & ~(31u);
+    for (i = 0; i < integral_size; i += 32u) {
+        /*
+         * Until we can guarantee that the buffers are properly (32-byte)
+         * aligned, we use the unaligned forms.
+         */
+        __m256 o = _mm256_loadu_ps((const float *) (out + i));
+        __m256 p = _mm256_loadu_ps((const float *) (pad + i));
+
+        _mm256_storeu_ps((float *) (out + i), _mm256_xor_ps(o, p));
+    }
+
+    /* Finish off partial words. */
+    for (; i < size; i++) {
+        out[i] ^= pad[i];
+    }
+}
+#endif
+
+typedef void (*xor_f)(char *, const char *, size_t);
+static xor_f f =
+#if defined(__SSE__) || defined(__AVX__)
+    /* We have something to check at runtime. */
+    NULL
+#else
+    /* Use the C-based codepath, as neither SSE nor AVX have compiler support */
+    xor_c
+#endif
+    ;
+
+/**
+ * This is a no-op if f.  Otherwise, we use cpuid to identify the available
+ * codepaths available to us.  As we expect these instruction sets to remain
+ * constrant throughout execution, this function should produce the same results
+ * and consequently, it is safe to call concurrently (so long as f has a memory
+ * type that supports atomic stores in light of parallel writers).
+ */
+static void select_xor() {
+    if (f) {
+        return;
+    }
+
+    #if __x86_64__ || __i386__
+    unsigned flags_a, flags_b, flags_c, flags_d;
+
+    __asm__("cpuid" :
+        "=a"(flags_a), "=b"(flags_b), "=c"(flags_c), "=d"(flags_d) : "a"(1));
+
+    #ifdef __AVX__
+    const unsigned avx_osxsave = 0x18000000;
+
+    if ((flags_c & avx_osxsave) == avx_osxsave) {
+        unsigned eax, edx;
+        __asm__("xgetbv" : "=a"(eax), "=d"(edx) : "c"(0));
+        if ((eax & 0x06) == 0x06) {
+            f = xor_avx;
+            return;
+        }
+    }
+    #endif
+
+    #ifdef __SSE__
+    const unsigned sse = 0x01000000;
+
+    if ((flags_d & sse) == sse) {
+        f = xor_sse;
+        return;
+    }
+    #endif
+    #endif
+
+    f = xor_c;
+}
+
 int execute_xor(XorWorkUnit* work, size_t length) {
+  /* Choose the xor algorithm. */
+  select_xor();
+
   while (length > 0) {
     size_t size = length < BUFFER_LENGTH ? length : BUFFER_LENGTH;
     length -= size;
@@ -80,23 +199,14 @@ int execute_xor(XorWorkUnit* work, size_t length) {
       return -1;
     }
 
-    /* Perform the encryption. Do as much as possible with machine words.
-     * We don't care about endianness because they're read and written in
-     * same order. */
-    for (int i = 0; i < size / sizeof(size_t); ++i) {
-      /* TODO: Consider using intrinsics if the compiler supports them. */
-      ((size_t*)work->buf[0])[i] ^= ((size_t*)work->buf[1])[i];
-    }
-
-    /* Finish off any partial words that are not a multiple. */
-    for (int i = size - (size % sizeof(size_t)); i < size ; ++i) {
-      work->buf[0][i] ^= work->buf[1][i];
-    }
+    /* Perform the encryption. */
+    f(work->buf[0], work->buf[1], size);
 
     if (fwrite(work->buf[0], 1, size, work->output) != size) {
       execute_cleanup(work);
       return -1;
     }
+  }
 
   return 0;
 }
